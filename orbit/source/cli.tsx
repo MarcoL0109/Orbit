@@ -10,20 +10,30 @@ const cli = meow(
 	  $ orbit
 
 	Options
-		--name  Your name
+	  --endpoint, -e  Specify a custom Python backend URL [Default: http://localhost:8000]
 
 	Examples
-	  $ orbit --name=Jane
-	  Hello, Jane
-`,
+	  $ orbit
+	  $ orbit --endpoint=http://localhost:5000
+	`,
 	{
 		importMeta: import.meta,
 		flags: {
-			name: {
+			endpoint: {
 				type: 'string',
+				shortFlag: 'e',
+				default: 'http://localhost:8000'
 			},
 		},
 	},
 );
 
-render(<App name={cli.flags.name} />);
+// Enter the alternative screen buffer to create a clean "app" experience
+process.stdout.write('\x1b[?1049h');
+
+const { waitUntilExit } = render(<App endpoint={cli.flags.endpoint} />);
+
+// When the Ink application exits, cleanly restore the user's terminal screen
+waitUntilExit().then(() => {
+	process.stdout.write('\x1b[?1049l');
+});
