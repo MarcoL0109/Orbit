@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import Spinner from 'ink-spinner';
+import TextInput from 'ink-text-input';
 
 
 interface AgentRunnerProps {
@@ -11,6 +12,17 @@ export default function AgentRunner({ endpoint }: AgentRunnerProps) {
 	const [isRunning, setIsRunning] = useState(true);
 	const [status, setStatus] = useState('Connecting to LangChain agent...');
 	const [agentLogs, setAgentLogs] = useState<string[]>([]);
+	const [query, setQuery] = useState('');
+	const [history, setHistory] = useState<string[]>([]);
+
+	const handleSubmit = (value: string) => {
+		let trimmedValue = value.trim();
+		trimmedValue += '\n'
+		if (!trimmedValue) return;
+		setHistory((prevHistory) => [...prevHistory, trimmedValue]);
+		setQuery(''); 
+	};
+
 	
 	const { exit } = useApp();
 
@@ -44,7 +56,6 @@ export default function AgentRunner({ endpoint }: AgentRunnerProps) {
 				
 				const data = await response.json();
 				
-				// Expecting your Python API to return { status: "...", logs: [...] }
 				if (data.status) setStatus(data.status);
 				if (data.logs) setAgentLogs(data.logs);
 
@@ -66,7 +77,6 @@ export default function AgentRunner({ endpoint }: AgentRunnerProps) {
 
 	return (
 		<Box flexDirection="column" padding={1} borderStyle="round" borderColor="yellow">
-			{/* <BackgroundIcon imagePath="./assets/orbit.png" width={45} /> */}
 			<Box marginBottom={1} justifyContent="space-between">
 				<Text color="black" backgroundColor="yellow" bold> ORBIT AGENT RUNNER </Text>
 				<Text color="gray">{endpoint}</Text>
@@ -88,6 +98,26 @@ export default function AgentRunner({ endpoint }: AgentRunnerProps) {
 				{agentLogs.length === 0 && <Text dimColor> No activities logged yet.</Text>}
 			</Box>
 			
+
+			<Box marginBottom={1}>
+				<Text color="green">🚀 Executing agent command:</Text>
+			</Box>
+
+			<Box marginBottom={1} flexDirection='column'>
+				<Text bold>{history}</Text>
+			</Box>
+
+			<Box>
+				<Text color="yellow" bold>orbit-agent ❯ </Text>
+				
+				<TextInput 
+					value={query} 
+					onChange={setQuery} 
+					onSubmit={handleSubmit}
+					placeholder="Enter your prompt here..."
+				/>
+			</Box>
+
 			<Box borderStyle="single" borderColor="gray" paddingX={1}>
 				<Text dimColor>Controls: </Text>
 				<Text color="cyan" bold> [SPACE] </Text>
