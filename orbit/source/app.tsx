@@ -119,7 +119,7 @@ export default function AgentRunner({ endpoint }: AgentRunnerProps) {
 			</Box>
 
 			<Box borderStyle="single" borderColor="gray" paddingX={1}>
-				<Text dimColor>Controls: </Text>
+				<Text dimColor>Options: </Text>
 				<Text color="cyan" bold> [SPACE] </Text>
 				<Text dimColor>{isRunning ? 'Pause' : 'Resume'} | </Text>
 				<Text color="red" bold> [Q] </Text>
