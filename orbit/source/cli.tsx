@@ -1,39 +1,37 @@
 #!/usr/bin/env node
+
 import React from 'react';
-import {render} from 'ink';
-import meow from 'meow';
-import App from './app.js';
+import { render } from 'ink';
+import { Command } from 'commander';
+import { App } from './app.js';
 
-const cli = meow(
-	`
-	Usage
-	  $ orbit
+const program = new Command();
 
-	Options
-	  --endpoint, -e  Specify a custom Python backend URL [Default: http://localhost:8000]
+program
+  .name('orbit')
+  .description('Orbit - AI QA agent for E2E testing')
+  .version('0.1.0');
 
-	Examples
-	  $ orbit
-	  $ orbit --endpoint=http://localhost:5000
-	`,
-	{
-		importMeta: import.meta,
-		flags: {
-			endpoint: {
-				type: 'string',
-				shortFlag: 'e',
-				default: 'http://localhost:8000'
-			},
-		},
-	},
-);
+program
+  .argument('[prompt...]', 'What you want Orbit to test')
+  .action((promptParts: string[]) => {
+    const initialPrompt = promptParts.join(' ').trim();
 
-// Enter the alternative screen buffer to create a clean "app" experience
-process.stdout.write('\x1b[?1049h');
+    render(<App initialPrompt={initialPrompt || undefined} />);
+  });
 
-const { waitUntilExit } = render(<App endpoint={cli.flags.endpoint} />);
+program
+  .command('scan')
+  .description('Scan the current project')
+  .action(() => {
+    render(<App initialPrompt="Scan this project" />);
+  });
 
-// When the Ink application exits, cleanly restore the user's terminal screen
-waitUntilExit().then(() => {
-	process.stdout.write('\x1b[?1049l');
-});
+program
+  .command('init')
+  .description('Create Orbit config in the current project')
+  .action(() => {
+    render(<App initialPrompt="Initialize Orbit config" />);
+  });
+
+program.parse();
