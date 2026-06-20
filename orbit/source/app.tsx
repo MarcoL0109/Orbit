@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
+import { detectProjectRoot } from './search.js';
 
 
 type AppProps = {
@@ -29,11 +30,29 @@ export function App({ initialPrompt }: AppProps) {
 
 	if (!prompt) return;
 
-	if (prompt.toLowerCase() === 'exit') {
+	if (prompt.toLowerCase() === '/exit') {
 		process.exit(0);
 	}
 
 	setQuery('');
+
+	if (prompt.toLowerCase() === '/search') {
+		const res = detectProjectRoot();
+
+		setMessages((prev) => [
+		...prev,
+		{
+			role: 'user',
+			content: prompt,
+		},
+		{
+			role: 'agent',
+			content: formatProjectDetectionResult(res),
+		},
+		]);
+
+		return;
+	}
 
 	setMessages((prev) => [
 		...prev,
@@ -45,7 +64,6 @@ export function App({ initialPrompt }: AppProps) {
 
 	setIsThinking(true);
 
-	// Replace this with your real agent call later
 	const agentResponse = await fakeAgentResponse(prompt);
 
 	setMessages((prev) => [
@@ -57,7 +75,39 @@ export function App({ initialPrompt }: AppProps) {
 	]);
 
 	setIsThinking(false);
-  };
+	};
+
+
+  function formatProjectDetectionResult(result: ReturnType<typeof detectProjectRoot>): string {
+	if (!result || !result.isProject) {
+		return `No project detected in this directory.
+
+	Try:
+	- cd into a project folder
+	- run Orbit from inside your app
+	- use /projects to choose a remembered project later`;
+	}
+
+	return `Project detected
+
+		Root:
+		${result.root}
+
+		Confidence:
+		${result.confidence}%
+
+		Markers:
+		${result.markers.length > 0 ? result.markers.join(', ') : 'None'}
+
+		Package manager:
+		${result.packageManager ?? 'Not Detected'}
+
+		Framework:
+		${result.framework ?? 'Not Detected'}
+
+		Test framework:
+		${result.testFramework ?? 'Not Detected'}`;
+	}
 
   return (
     <Box flexDirection="column">
@@ -133,7 +183,7 @@ export function App({ initialPrompt }: AppProps) {
       </Box>
 
       <Box marginTop={1}>
-        <Text color="red">Type 'exit' to quit</Text>
+        <Text color="red">Type '/exit' to quit</Text>
       </Box>
     </Box>
   );
