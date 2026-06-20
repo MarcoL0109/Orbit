@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-
 type ProjectDetectionResult = {
   isProject: boolean;
   root: string | null;
@@ -11,26 +10,27 @@ type ProjectDetectionResult = {
   packageManager?: 'pnpm' | 'npm' | 'yarn' | 'bun';
   framework?: string;
   testFramework?: string;
+  hasOrbitFolder: boolean;
 };
 
-const STRONG_MARKERS = [
+const ROOT_MARKERS = [
+  '.orbit',
+  'orbit.config.ts',
+  'orbit.config.js',
   'package.json',
   'playwright.config.ts',
   'playwright.config.js',
   'playwright.config.mts',
   'cypress.config.ts',
   'cypress.config.js',
-  'vite.config.ts',
-  'vite.config.js',
   'next.config.ts',
   'next.config.js',
+  'vite.config.ts',
+  'vite.config.js',
   '.git',
-  '.orbit',
-  'orbit.config.ts',
-  'orbit.config.js',
 ];
 
-const MEDIUM_MARKERS = [
+const SUPPORTING_MARKERS = [
   'src',
   'app',
   'pages',
@@ -42,35 +42,32 @@ const MEDIUM_MARKERS = [
   'bun.lockb',
 ];
 
-function exists(targetPath: string): boolean {
-  return fs.existsSync(targetPath);
+function exists(dir: string, name: string): boolean {
+  return fs.existsSync(path.join(dir, name));
 }
 
 function getMarkers(dir: string): string[] {
-  const markers: string[] = [];
+  return [...ROOT_MARKERS, ...SUPPORTING_MARKERS].filter((marker) =>
+    exists(dir, marker),
+  );
+}
 
-  for (const marker of [...STRONG_MARKERS, ...MEDIUM_MARKERS]) {
-    if (exists(path.join(dir, marker))) {
-      markers.push(marker);
-    }
-  }
-
-  return markers;
+function hasRootMarker(markers: string[]): boolean {
+  return markers.some((marker) => ROOT_MARKERS.includes(marker));
 }
 
 function scoreMarkers(markers: string[]): number {
   let score = 0;
 
   for (const marker of markers) {
-    if (marker === '.orbit') score += 50;
-    else if (marker.startsWith('orbit.config')) score += 50;
-    else if (marker === 'package.json') score += 35;
-    else if (marker.startsWith('playwright.config')) score += 35;
-    else if (marker.startsWith('cypress.config')) score += 30;
-    else if (marker.startsWith('next.config')) score += 25;
-    else if (marker.startsWith('vite.config')) score += 25;
-    else if (marker === '.git') score += 20;
-    else if (marker.endsWith('lock.yaml') || marker.endsWith('lock.json') || marker.endsWith('lockb')) score += 10;
+    if (marker === '.orbit') score += 80;
+    else if (marker.startsWith('orbit.config')) score += 75;
+    else if (marker === 'package.json') score += 50;
+    else if (marker.startsWith('playwright.config')) score += 45;
+    else if (marker.startsWith('cypress.config')) score += 40;
+    else if (marker.startsWith('next.config')) score += 35;
+    else if (marker.startsWith('vite.config')) score += 35;
+    else if (marker === '.git') score += 25;
     else score += 5;
   }
 
@@ -83,7 +80,6 @@ function detectPackageManager(markers: string[]): ProjectDetectionResult['packag
   if (markers.includes('bun.lockb')) return 'bun';
   if (markers.includes('package-lock.json')) return 'npm';
   if (markers.includes('package.json')) return 'npm';
-
   return undefined;
 }
 
@@ -103,19 +99,13 @@ export function detectProjectRoot(startDir = process.cwd()): ProjectDetectionRes
   let currentDir = path.resolve(startDir);
   const homeDir = os.homedir();
 
-  let bestMatch: ProjectDetectionResult = {
-    isProject: false,
-    root: null,
-    confidence: 0,
-    markers: [],
-  };
-
   while (true) {
     const markers = getMarkers(currentDir);
-    const confidence = scoreMarkers(markers);
 
-    if (confidence > bestMatch.confidence) {
-      bestMatch = {
+    if (hasRootMarker(markers)) {
+      const confidence = scoreMarkers(markers);
+
+      return {
         isProject: confidence >= 40,
         root: confidence >= 40 ? currentDir : null,
         confidence,
@@ -123,20 +113,24 @@ export function detectProjectRoot(startDir = process.cwd()): ProjectDetectionRes
         packageManager: detectPackageManager(markers),
         framework: detectFramework(markers),
         testFramework: detectTestFramework(markers),
+        hasOrbitFolder: markers.includes('.orbit'),
       };
     }
 
     const parentDir = path.dirname(currentDir);
 
-    if (
-      parentDir === currentDir ||
-      currentDir === homeDir
-    ) {
+    if (parentDir === currentDir || parentDir == homeDir|| currentDir === homeDir) {
       break;
     }
 
     currentDir = parentDir;
   }
 
-  return bestMatch;
+  return {
+    isProject: false,
+    root: null,
+    confidence: 0,
+    markers: [],
+    hasOrbitFolder: false,
+  };
 }
