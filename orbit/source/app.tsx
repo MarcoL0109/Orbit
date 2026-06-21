@@ -7,19 +7,19 @@ import SelectInput from 'ink-select-input';
 
 
 type ProjectInfo = {
-  isProject: boolean;
-  root: string | null;
-  confidence: number;
-  markers: string[];
-  framework?: string;
-  packageManager?: string;
-  testFramework?: string;
-  hasOrbitFolder?: boolean;
+	isProject: boolean;
+	root: string | null;
+	confidence: number;
+	markers: string[];
+	framework?: string;
+	packageManager?: string;
+	testFramework?: string;
+	hasOrbitFolder?: boolean;
 };
 
 type Message = {
-  role: 'user' | 'agent' | 'system';
-  content: string;
+	role: 'user' | 'agent' | 'system';
+	content: string;
 };
 
 type ProjectOptions = {
@@ -28,88 +28,83 @@ type ProjectOptions = {
 }
 
 export function App() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [query, setQuery] = useState<string>("");
-  const [isBooting, setIsBooting] = useState(true);
-  const [project, setProject] = useState<ProjectInfo | null>(null);
-  const [projectPresent, setProjectPresent] = useState<boolean>(true);
-  const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
-  const [selectedOption, setSelectedOption] = useState<string>("");
+	const [messages, setMessages] = useState<Message[]>([]);
+	const [query, setQuery] = useState<string>("");
+	const [isBooting, setIsBooting] = useState(true);
+	const [project, setProject] = useState<ProjectInfo | null>(null);
+	const [projectPresent, setProjectPresent] = useState<boolean>(true);
+	const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
+	const [selectedOption, setSelectedOption] = useState<string>("");
 
 
-  useEffect(() => {
-    async function bootOrbit() {
-      setIsBooting(true);
+	useEffect(() => {
+    	async function bootOrbit() {
+      		setIsBooting(true);
 
-      const detectedProject = detectProjectRoot();
+      		const detectedProject = detectProjectRoot();
 
-      setProject(detectedProject);
+      		setProject(detectedProject);
 
-      if (detectedProject.isProject && detectedProject.root) {
-        setMessages([
-          {
-            role: 'system',
-            content: `Project detected: ${detectedProject.root}`,
-          },
-        ]);
-      } else {
-		// I need to add a project selection mode in this block
-		setProjectPresent(false);
-		// For now just use fake options (but here should be project path or something)
-		setProjectOptions(
-			[
-				{label: 'Option 1: Orbit', value: 'red'},
-				{label: 'Option 2: Redemption', value: 'yellow'},
-				{label: 'Option 3: Salary', value: 'orange'},
-				{label: 'Option 4: WOW', value: 'blue'},
-				{label: 'Option 5: Quit Orbit', value: 'quit'}
-			]
-		)
-        setMessages([
-          {
-            role: 'system',
-            content:
-              'No project detected in this directory. You can still ask Orbit to choose a recent project later.',
-          },
-        ]);
-      }
+      		if (detectedProject.isProject && detectedProject.root) {
+        		setMessages([
+          		{
+            		role: 'system',
+            		content: `Project detected: ${detectedProject.root}`,
+          		},
+        		]);
+      		} else {
+				// I need to add a project selection mode in this block
+				setProjectPresent(false);
+				// For now just use fake options (but here should be project path or something)
+				setProjectOptions(
+					[
+						{label: 'Option 1: Orbit', value: 'red'},
+						{label: 'Option 2: Redemption', value: 'yellow'},
+						{label: 'Option 3: Salary', value: 'orange'},
+						{label: 'Option 4: WOW', value: 'blue'},
+						{label: 'Option 5: Quit Orbit', value: 'quit'}
+					]
+				)
+				setMessages([
+				{
+					role: 'system',
+					content:
+					'No project detected in this directory. You can still ask Orbit to choose a recent project later.',
+				},
+				]);
+      		}
 
-      setIsBooting(false);
-    }
+      		setIsBooting(false);
+    	}
+    	bootOrbit();
+	}, []);
 
-    bootOrbit();
-  }, []);
 
-
-  const handleSelect = (item: any) => {
-	setSelectedOption(item.value);
-	if (selectedOption === 'quit') {
-		process.exit(0);
+	const handleSelect = (item: any) => {
+		setSelectedOption(item.value);
+		if (selectedOption === 'quit') {
+			process.exit(0);
+		}
 	}
-  }
 
 
+	const handleSubmitQuery = async (value: string) => {
+		const prompt = value.trim();
+		if (!prompt) return;
 
-  const handleSubmitQuery = async (value: string) => {
-    const prompt = value.trim();
-    if (!prompt) return;
-
-    if (prompt.toLowerCase() === '/exit') {
-      process.exit(0);
-    }
-
-    setQuery('');
-
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ]);
-
-    // Agent logic here
-  };
+		if (prompt.toLowerCase() === '/exit') {
+			process.exit(0);
+		}
+		setQuery('');
+		setMessages((prev) => [
+			...prev,
+			{
+			role: 'user',
+			content: prompt,
+			},
+		]);
+		// Agent logic here
+	};
 
   return (
     <Box flexDirection="column">
@@ -131,28 +126,28 @@ export function App() {
 			{!isBooting && project?.isProject && (
 			<>
 				<Text>
-				Project Path: <Text dimColor>{project.root}</Text>
+					Project Path: <Text dimColor>{project.root}</Text>
 				</Text>
 				<Text>
-				Confidence: <Text color="green">{project.confidence}%</Text>
+					Confidence: <Text color="green">{project.confidence}%</Text>
 				</Text>
 				<Text>
-				Stack:{' '}
-				<Text color="green">
-					{[
-					project.framework,
-					project.testFramework,
-					project.packageManager,
-					]
-					.filter(Boolean)
-					.join(' + ') || 'Unknown'}
-				</Text>
+					Stack:{' '}
+					<Text color="green">
+						{[
+							project.framework,
+							project.testFramework,
+							project.packageManager,
+						]
+						.filter(Boolean)
+						.join(' + ') || 'Unknown'}
+					</Text>
 				</Text>
 				<Text>
-				Orbit Context:{' '}
-				<Text color={project.hasOrbitFolder ? 'green' : 'red'}>
-					{project.hasOrbitFolder ? '.orbit found' : 'not initialized'}
-				</Text>
+					Orbit Context:{' '}
+					<Text color={project.hasOrbitFolder ? 'green' : 'red'}>
+						{project.hasOrbitFolder ? '.orbit found' : 'not initialized'}
+					</Text>
 				</Text>
 			</>
 			)}
@@ -165,7 +160,7 @@ export function App() {
 			)}
 
 			<Text>
-			Approval: <Text color="yellow">Ask before write/run</Text>
+				Approval: <Text color="yellow">Ask before write/run</Text>
 			</Text>
 		</Box>
 		</Box>
@@ -192,10 +187,10 @@ export function App() {
 			<Box marginTop={1}>
 				<Text color="cyan">{'> '}</Text>
 				<TextInput
-				value={query}
-				onChange={setQuery}
-				onSubmit={handleSubmitQuery}
-				placeholder="Ask Orbit to test something"
+					value={query}
+					onChange={setQuery}
+					onSubmit={handleSubmitQuery}
+					placeholder="Ask Orbit to test something"
 				/>
 			</Box>
 		)}
@@ -211,7 +206,7 @@ export function App() {
 		)}
 
 		<Box marginTop={1}>
-		<Text color="red">Type '/exit' to quit</Text>
+			<Text color="red">Type '/exit' to quit</Text>
 		</Box>
     </Box>
   );
