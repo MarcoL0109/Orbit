@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
 import { detectProjectRoot } from './search.js';
+import SelectInput from 'ink-select-input';
 
 
 type ProjectInfo = {
@@ -21,11 +22,20 @@ type Message = {
   content: string;
 };
 
+type ProjectOptions = {
+	label: string,
+	value: string,
+}
+
 export function App() {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState<string>("");
   const [isBooting, setIsBooting] = useState(true);
   const [project, setProject] = useState<ProjectInfo | null>(null);
+  const [projectPresent, setProjectPresent] = useState<boolean>(true);
+  const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
+  const [selectedOption, setSelectedOption] = useState<string>("");
+
 
   useEffect(() => {
     async function bootOrbit() {
@@ -44,6 +54,17 @@ export function App() {
         ]);
       } else {
 		// I need to add a project selection mode in this block
+		setProjectPresent(false);
+		// For now just use fake options (but here should be project path or something)
+		setProjectOptions(
+			[
+				{label: 'Option 1: Orbit', value: 'red'},
+				{label: 'Option 2: Redemption', value: 'yellow'},
+				{label: 'Option 3: Salary', value: 'orange'},
+				{label: 'Option 4: WOW', value: 'blue'},
+				{label: 'Option 5: Quit Orbit', value: 'quit'}
+			]
+		)
         setMessages([
           {
             role: 'system',
@@ -58,6 +79,16 @@ export function App() {
 
     bootOrbit();
   }, []);
+
+
+  const handleSelect = (item: any) => {
+	setSelectedOption(item.value);
+	if (selectedOption === 'quit') {
+		process.exit(0);
+	}
+  }
+
+
 
   const handleSubmitQuery = async (value: string) => {
     const prompt = value.trim();
@@ -139,38 +170,49 @@ export function App() {
 		</Box>
 		</Box>
 
-      <Box marginTop={1} flexDirection="column">
-        {messages.map((message, index) => (
-          <Text key={index} dimColor={message.role === 'system'}>
-            {message.role === 'user'
-              ? `You: ${message.content}`
-              : message.role === 'agent'
-                ? `Orbit: ${message.content}`
-                : message.content}
-          </Text>
-        ))}
-      </Box>
+		<Box marginTop={1} flexDirection="column">
+			{messages.map((message, index) => (
+				<Text key={index} dimColor={message.role === 'system'}>
+				{message.role === 'user'
+					? `You: ${message.content}`
+					: message.role === 'agent'
+					? `Orbit: ${message.content}`
+					: message.content}
+				</Text>
+			))}
+		</Box>
 
-      {isBooting ? (
-        <Box marginTop={1}>
-          <Text color="yellow">
-            <Spinner type="dots" /> Detecting project...
-          </Text>
-        </Box>
-      ) : (
-        <Box marginTop={1}>
-          <Text color="cyan">{'> '}</Text>
-          <TextInput
-            value={query}
-            onChange={setQuery}
-            onSubmit={handleSubmitQuery}
-            placeholder="Ask Orbit to test something"
-          />
-        </Box>
-      )}
-	  <Box marginTop={1}>
-        <Text color="red">Type '/exit' to quit</Text>
-      </Box>
+		{isBooting && projectPresent ? (
+			<Box marginTop={1}>
+				<Text color="yellow">
+				<Spinner type="dots" /> Detecting project...
+				</Text>
+			</Box>
+			) : (
+			<Box marginTop={1}>
+				<Text color="cyan">{'> '}</Text>
+				<TextInput
+				value={query}
+				onChange={setQuery}
+				onSubmit={handleSubmitQuery}
+				placeholder="Ask Orbit to test something"
+				/>
+			</Box>
+		)}
+
+		{!projectPresent && (
+			<Box flexDirection="column">
+				<Text>Select an option (Use arrow keys and Enter):</Text>
+				<SelectInput
+					items={projectOptions}
+					onSelect={handleSelect}
+				/>
+			</Box>
+		)}
+
+		<Box marginTop={1}>
+		<Text color="red">Type '/exit' to quit</Text>
+		</Box>
     </Box>
   );
 }
