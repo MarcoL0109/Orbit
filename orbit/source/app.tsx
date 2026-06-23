@@ -32,9 +32,10 @@ export function App() {
 	const [query, setQuery] = useState<string>("");
 	const [isBooting, setIsBooting] = useState(true);
 	const [project, setProject] = useState<ProjectInfo | null>(null);
-	const [projectPresent, setProjectPresent] = useState<boolean>(true);
+	const [projectPresent, setProjectPresent] = useState<boolean>(false);
 	const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
 	const [selectedOption, setSelectedOption] = useState<string>("");
+	const [inputPath, setInputPath] = useState<string>("");
 
 
 	useEffect(() => {
@@ -46,6 +47,7 @@ export function App() {
       		setProject(detectedProject);
 
       		if (detectedProject.isProject && detectedProject.root) {
+				setProjectPresent(true);
         		setMessages([
           		{
             		role: 'system',
@@ -54,7 +56,6 @@ export function App() {
         		]);
       		} else {
 				// I need to add a project selection mode in this block
-				setProjectPresent(false);
 				// For now just use fake options (but here should be project path or something)
 				setProjectOptions(
 					[
@@ -62,15 +63,16 @@ export function App() {
 						{label: 'Option 2: Redemption', value: 'yellow'},
 						{label: 'Option 3: Salary', value: 'orange'},
 						{label: 'Option 4: WOW', value: 'blue'},
-						{label: 'Option 5: Quit Orbit', value: 'quit'}
+						{label: 'Option 5: Add New Project', value: 'add'},
+						{label: 'Option 6: Quit Orbit', value: 'exit'}
 					]
 				)
 				setMessages([
-				{
-					role: 'system',
-					content:
-					'No project detected in this directory. You can still ask Orbit to choose a recent project later.',
-				},
+					{
+						role: 'system',
+						content:
+						'No project detected in this directory. You can still ask Orbit to choose a recent project later.',
+					},
 				]);
       		}
 
@@ -82,7 +84,7 @@ export function App() {
 
 	const handleSelect = (item: any) => {
 		setSelectedOption(item.value);
-		if (selectedOption === 'quit') {
+		if (selectedOption === 'exit') {
 			process.exit(0);
 		}
 	}
@@ -106,12 +108,26 @@ export function App() {
 		// Agent logic here
 	};
 
+
+	const handleProjectPath = () => {
+		setMessages([
+			{
+				role: 'system',
+				content:
+				`Received Project Path: ${inputPath}`,
+			},
+		]);
+		setProjectPresent(true);
+		setInputPath("");
+		setSelectedOption("");
+	}
+
   return (
     <Box flexDirection="column">
       <Box borderStyle="round" paddingX={1} flexDirection="column">
 		<Box justifyContent="space-between">
 			<Text bold>🪐 Orbit</Text>
-			<Text color="yellow">Interactive Mode</Text>
+			<Text color="cyan">Interactive Mode</Text>
 		</Box>
 
 		<Text dimColor>AI QA agent for E2E testing</Text>
@@ -154,8 +170,8 @@ export function App() {
 
 			{!isBooting && !project?.isProject && (
 			<>
-				<Text color="yellow">No project detected</Text>
-				<Text dimColor>Run Orbit inside a project or choose a recent project.</Text>
+				<Text color="red">No project detected</Text>
+				<Text>Run Orbit inside a project or choose a recent project.</Text>
 			</>
 			)}
 
@@ -177,7 +193,7 @@ export function App() {
 			))}
 		</Box>
 
-		{isBooting && projectPresent ? (
+		{isBooting || !projectPresent ? (
 			<Box marginTop={1}>
 				<Text color="yellow">
 				<Spinner type="dots" /> Detecting project...
@@ -204,6 +220,18 @@ export function App() {
 				/>
 			</Box>
 		)}
+
+		{
+			selectedOption === "add" &&
+			<Box marginTop={1}>
+				<TextInput
+					value={inputPath}
+					onChange={setInputPath}
+					onSubmit={handleProjectPath}
+					placeholder="Type Project Path (FROM root)"
+				/>
+			</Box>
+		}
 
 		<Box marginTop={1}>
 			<Text color="red">Type '/exit' to quit</Text>
