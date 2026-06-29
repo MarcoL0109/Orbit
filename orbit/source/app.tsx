@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
 import { detectProjectRoot } from './search.js';
+import { validateProjectPath } from './path.js';
 import SelectInput from 'ink-select-input';
 
 
@@ -27,12 +28,16 @@ type ProjectOptions = {
 	value: string,
 }
 
-export function App() {
+type AppProps = {
+  initialPrompt?: string;
+}
+
+export function App({ initialPrompt }: AppProps) {
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [query, setQuery] = useState<string>("");
 	const [isBooting, setIsBooting] = useState(true);
 	const [project, setProject] = useState<ProjectInfo | null>(null);
-	const [projectPresent, setProjectPresent] = useState<boolean>(false);
+	const [selectProjectMode, setSelectProjectMode] = useState<boolean>(false);
 	const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
 	const [selectedOption, setSelectedOption] = useState<string>("");
 	const [inputPath, setInputPath] = useState<string>("");
@@ -47,7 +52,7 @@ export function App() {
       		setProject(detectedProject);
 
       		if (detectedProject.isProject && detectedProject.root) {
-				setProjectPresent(true);
+				setSelectProjectMode(false);
         		setMessages([
           		{
             		role: 'system',
@@ -57,16 +62,8 @@ export function App() {
       		} else {
 				// I need to add a project selection mode in this block
 				// For now just use fake options (but here should be project path or something)
-				setProjectOptions(
-					[
-						{label: 'Option 1: Orbit', value: 'red'},
-						{label: 'Option 2: Redemption', value: 'yellow'},
-						{label: 'Option 3: Salary', value: 'orange'},
-						{label: 'Option 4: WOW', value: 'blue'},
-						{label: 'Option 5: Add New Project', value: 'add'},
-						{label: 'Option 6: Quit Orbit', value: 'exit'}
-					]
-				)
+				setSelectProjectMode(true);
+				constructProjectOptions();
 				setMessages([
 					{
 						role: 'system',
@@ -75,7 +72,6 @@ export function App() {
 					},
 				]);
       		}
-
       		setIsBooting(false);
     	}
     	bootOrbit();
@@ -87,6 +83,31 @@ export function App() {
 		if (selectedOption === 'exit') {
 			process.exit(0);
 		}
+		if (selectedOption === 'quit') {
+			setSelectProjectMode(false);
+		}
+	}
+
+
+	const constructProjectOptions = () => {
+		setProjectOptions(
+			[
+				{label: 'Option 1: Orbit', value: 'red'},
+				{label: 'Option 2: Redemption', value: 'yellow'},
+				{label: 'Option 3: Salary', value: 'orange'},
+				{label: 'Option 4: WOW', value: 'blue'},
+				{label: 'Option 5: Add New Project', value: 'add'},
+				{label: 'Option 6: Quit Orbit', value: 'exit'}
+			]
+		)
+		if (project) {
+			setProjectOptions((prev) => 
+				[
+					...prev,
+					{label: "Option 7: Exit Menu", value: 'quit'}
+				]
+			)
+		}
 	}
 
 
@@ -97,15 +118,29 @@ export function App() {
 		if (prompt.toLowerCase() === '/exit') {
 			process.exit(0);
 		}
+
+		if (prompt.toLowerCase() === '/switch') {
+			constructProjectOptions();
+			setSelectProjectMode(true);
+		}
 		setQuery('');
 		setMessages((prev) => [
 			...prev,
 			{
-			role: 'user',
-			content: prompt,
+				role: 'user',
+				content: prompt,
+			},
+		]);
+
+		setMessages((prev) => [
+			...prev,
+			{
+				role: 'agent',
+				content: 'This is a mock response from Orbit',
 			},
 		]);
 		// Agent logic here
+		
 	};
 
 
@@ -113,14 +148,24 @@ export function App() {
 		setMessages([
 			{
 				role: 'system',
-				content:
-				`Received Project Path: ${inputPath}`,
+				content: `Received Project Path: ${inputPath}`,
 			},
 		]);
-		setProjectPresent(true);
+		const res = validateProjectPath(inputPath);
+		if (!res.ok) {
+			setMessages((prev) => [
+				...prev,
+				{
+					role: 'system',
+					content: `Project path ${res.path} does not exist`,
+				},
+			]);
+		}
+		setSelectProjectMode(false);
 		setInputPath("");
 		setSelectedOption("");
 	}
+
 
   return (
     <Box flexDirection="column">
@@ -193,7 +238,7 @@ export function App() {
 			))}
 		</Box>
 
-		{isBooting || !projectPresent ? (
+		{isBooting || selectProjectMode ? (
 			<Box marginTop={1}>
 				<Text color="yellow">
 				<Spinner type="dots" /> Detecting project...
@@ -211,7 +256,7 @@ export function App() {
 			</Box>
 		)}
 
-		{!projectPresent && (
+		{selectProjectMode && (
 			<Box flexDirection="column">
 				<Text>Select an option (Use arrow keys and Enter):</Text>
 				<SelectInput
