@@ -2,9 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
-import { detectProjectRoot } from './search.js';
-import { validateProjectPath } from './path.js';
+import { detectProjectRoot } from './projects/search.js';
+import { validateProjectPath } from './projects/path.js';
+import { parseCommand } from './commands/commands.js';
 import SelectInput from 'ink-select-input';
+import { Message } from './commands/context.js'
+import { runCommand } from './commands/rumCommand.js';
+
 
 
 type ProjectInfo = {
@@ -18,18 +22,10 @@ type ProjectInfo = {
 	hasOrbitFolder?: boolean;
 };
 
-
-type Message = {
-	role: 'user' | 'agent' | 'system';
-	content: string;
-};
-
-
 type ProjectOptions = {
 	label: string,
 	value: string,
 }
-
 
 type AppProps = {
 	initialPrompt?: string;
@@ -40,6 +36,7 @@ export function App({ initialPrompt }: AppProps) {
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [query, setQuery] = useState<string>("");
 	const [isBooting, setIsBooting] = useState(true);
+	const [isThinking, setIsThinking] = useState(false);
 	const [project, setProject] = useState<ProjectInfo | null>(null);
 	const [selectProjectMode, setSelectProjectMode] = useState<boolean>(false);
 	const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
@@ -116,39 +113,42 @@ export function App({ initialPrompt }: AppProps) {
 
 	const handleSubmitQuery = async (value: string) => {
 		const prompt = value.trim();
+
 		if (!prompt) return;
 
-		// This block needs to be migrated to somewhere else that has a structure that is more global and abstract
-		if (prompt.toLowerCase() === '/exit') {
-			process.exit(0);
-		}
-
-		if (prompt.toLowerCase() === '/switch') {
-			constructProjectOptions();
-			setSelectProjectMode(true);
-		}
-
-		if (prompt[0] === '/') {
-
-		}
 		setQuery('');
-		setMessages((prev) => [
-			...prev,
-			{
-				role: 'user',
-				content: prompt,
-			},
-		]);
 
 		setMessages((prev) => [
 			...prev,
 			{
-				role: 'agent',
-				content: 'This is a mock response from Orbit',
+			role: 'user',
+			content: prompt,
 			},
 		]);
-		// Agent logic here
-	};
+
+		const commandHandled = await runCommand(prompt, {
+			setMessages,
+			setQuery,
+			setIsThinking,
+		});
+
+		if (commandHandled) {
+			return;
+		}
+
+		setIsThinking(true);
+
+
+		setMessages((prev) => [
+			...prev,
+			{
+			role: 'agent',
+			content: "This is a fake response from Orbit",
+			},
+		]);
+
+		setIsThinking(false);
+};
 
 
 	const handleProjectPath = () => {
