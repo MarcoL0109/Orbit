@@ -18,19 +18,23 @@ type ProjectInfo = {
 	hasOrbitFolder?: boolean;
 };
 
+
 type Message = {
 	role: 'user' | 'agent' | 'system';
 	content: string;
 };
+
 
 type ProjectOptions = {
 	label: string,
 	value: string,
 }
 
+
 type AppProps = {
-  initialPrompt?: string;
+	initialPrompt?: string;
 }
+
 
 export function App({ initialPrompt }: AppProps) {
 	const [messages, setMessages] = useState<Message[]>([]);
@@ -60,8 +64,7 @@ export function App({ initialPrompt }: AppProps) {
           		},
         		]);
       		} else {
-				// I need to add a project selection mode in this block
-				// For now just use fake options (but here should be project path or something)
+				// For now just use fake options (but here should be project path or names that is in Orbit's global memory)
 				setSelectProjectMode(true);
 				constructProjectOptions();
 				setMessages([
@@ -115,6 +118,7 @@ export function App({ initialPrompt }: AppProps) {
 		const prompt = value.trim();
 		if (!prompt) return;
 
+		// This block needs to be migrated to somewhere else that has a structure that is more global and abstract
 		if (prompt.toLowerCase() === '/exit') {
 			process.exit(0);
 		}
@@ -122,6 +126,10 @@ export function App({ initialPrompt }: AppProps) {
 		if (prompt.toLowerCase() === '/switch') {
 			constructProjectOptions();
 			setSelectProjectMode(true);
+		}
+
+		if (prompt[0] === '/') {
+
 		}
 		setQuery('');
 		setMessages((prev) => [
@@ -140,7 +148,6 @@ export function App({ initialPrompt }: AppProps) {
 			},
 		]);
 		// Agent logic here
-		
 	};
 
 
@@ -160,6 +167,25 @@ export function App({ initialPrompt }: AppProps) {
 					content: `Project path ${res.path} does not exist`,
 				},
 			]);
+		} else {
+			const checkProject = detectProjectRoot(res.path);
+			if (checkProject.isProject) {
+				setMessages((prev) => [
+					...prev,
+					{
+						role: 'system',
+						content: `Project detected: ${checkProject.root}`,
+					},
+				]);
+			} else {
+				setMessages((prev) => [
+					...prev,
+					{
+						role: 'system',
+						content: `Please ensure the path direct Orbit to a project`,
+					},
+				]);
+			}
 		}
 		setSelectProjectMode(false);
 		setInputPath("");
@@ -229,11 +255,11 @@ export function App({ initialPrompt }: AppProps) {
 		<Box marginTop={1} flexDirection="column">
 			{messages.map((message, index) => (
 				<Text key={index} dimColor={message.role === 'system'}>
-				{message.role === 'user'
-					? `You: ${message.content}`
-					: message.role === 'agent'
-					? `Orbit: ${message.content}`
-					: message.content}
+					{message.role === 'user'
+						? `You: ${message.content}`
+						: message.role === 'agent'
+						? `Orbit: ${message.content}`
+						: message.content}
 				</Text>
 			))}
 		</Box>
@@ -273,7 +299,7 @@ export function App({ initialPrompt }: AppProps) {
 					value={inputPath}
 					onChange={setInputPath}
 					onSubmit={handleProjectPath}
-					placeholder="Type Project Path (FROM root)"
+					placeholder="Type Project Path (FROM HOME)"
 				/>
 			</Box>
 		}
