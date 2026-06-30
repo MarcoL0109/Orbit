@@ -22,14 +22,14 @@ export const commands: OrbitCommand[] = [
                 {
                     role: 'agent',
                     content: `Available Orbit commands:
-
-                        /help       Show available commands
-                        /init       Initialize Orbit for this project
-                        /scan       Scan current project
-                        /projects   Show remembered projects
-                        /memory     Show project memory
-                        /clear      Clear the screen
-                        /exit       Exit Orbit`,
+                    /help       Show available commands
+                    /switch     Switch Orbit to work on a different project
+                    /init       Initialize Orbit for this project
+                    /scan       Scan current project
+                    /projects   Show remembered projects
+                    /memory     Show project memory
+                    /clear      Clear the screen
+                    /exit       Exit Orbit`,
                 },
             ])
         },
@@ -71,13 +71,29 @@ export const commands: OrbitCommand[] = [
     },
     {
         name: 'exit',
-        aliases: ['quit', 'q'],
         description: 'Exit Orbit',
         usage: '/exit',
         handler: () => {
             process.exit(0);
         },
     },
+    {
+        name: 'clear',
+        description: 'Clear Orbit terminal screen',
+        usage: '/clear',
+        handler: (_args, context) => {
+            context.setMessages([]);
+        }
+    },
+    {
+        name: "switch",
+        description: "Switch Orbit to work on a different project",
+        usage: '/switch',
+        handler: (_args, context) => {
+            
+        }
+    }
+
 ];
 
 export function parseCommand(input: string) {

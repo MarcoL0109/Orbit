@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
 import { detectProjectRoot } from './projects/search.js';
 import { validateProjectPath } from './projects/path.js';
-import { parseCommand } from './commands/commands.js';
 import SelectInput from 'ink-select-input';
-import { Message } from './commands/context.js'
+import type { Message } from './commands/context.js'
 import { runCommand } from './commands/rumCommand.js';
+import { getBestCommandCompletion, getCommandSuggestions } from './commands/autocomplete.js';
 
 
 
@@ -42,6 +42,17 @@ export function App({ initialPrompt }: AppProps) {
 	const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
 	const [selectedOption, setSelectedOption] = useState<string>("");
 	const [inputPath, setInputPath] = useState<string>("");
+	const suggestions = getCommandSuggestions(query);
+
+	useInput((_input, key) => {
+		if (key.tab) {
+		const completion = getBestCommandCompletion(query);
+
+		if (completion) {
+			setQuery(completion + ' ');
+		}
+		}
+	});
 
 
 	useEffect(() => {
@@ -279,6 +290,16 @@ export function App({ initialPrompt }: AppProps) {
 					onSubmit={handleSubmitQuery}
 					placeholder="Ask Orbit to test something"
 				/>
+				{/* Fix the style of this the suggestion component */}
+				{query.startsWith('/') && suggestions.length > 0 && (
+					<Box marginTop={1} flexDirection="column">
+					{suggestions.slice(0, 5).map((command) => (
+						<Text key={command.name} dimColor>
+						/{command.name} — {command.description}
+						</Text>
+					))}
+					</Box>
+				)}
 			</Box>
 		)}
 
