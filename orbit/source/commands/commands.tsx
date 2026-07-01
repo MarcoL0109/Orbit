@@ -1,4 +1,5 @@
 import type { CommandContext } from "./context.js";
+import { initOrbitProject } from '../init/init.js';
 
 
 export type OrbitCommand = {
@@ -49,8 +50,32 @@ export const commands: OrbitCommand[] = [
         name: 'init',
         description: 'Create .orbit project context',
         usage: '/init',
-        handler: async () => {
-            // initOrbitProject()
+        handler: async (_args, context) => {
+            // Not fully done yet, still need some TUI display to indicate is either initializing, success or failed
+            // Also can't really allow user to use this command if it is not in a valid project, but if user is not in a project they are forced to select one at the beginning so is this still an issue??
+            // And error checking...
+            if (context.project) {
+                try {
+                    context.setIsInitting(true);
+                    initOrbitProject({projectName: "Orbit", projectRoot: context.project?.root || process.cwd()});
+                    context.setIsInitting(false);
+                    context.setMessages([
+                        {
+                            role: 'system',
+                            content: `Orbit context initialized`,
+                            color: 'green'
+                        },
+                    ]);
+                } catch (error) {
+                    context.setMessages([
+                        {
+                            role: 'system',
+                            content: `Fail to Initalize Orbit Context`,
+                            color: 'red'
+                        },
+                    ]);
+                }
+            }
         },
     },
     {

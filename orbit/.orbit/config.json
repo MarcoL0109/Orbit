@@ -1,0 +1,10 @@
+{
+  "approvalMode": "ask",
+  "defaultBrowser": "chromium",
+  "baseUrl": "http://localhost:3000",
+  "devCommand": null,
+  "testCommand": null,
+  "testDir": "tests/e2e",
+  "writeMode": "ask",
+  "maxRepairAttempts": 3
+}

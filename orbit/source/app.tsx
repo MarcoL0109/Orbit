@@ -20,6 +20,7 @@ export function App({ initialPrompt }: AppProps) {
 	const [query, setQuery] = useState<string>("");
 	const [isBooting, setIsBooting] = useState(true);
 	const [isThinking, setIsThinking] = useState(false);
+	const [isInitting, setIsInitting] = useState(false);
 	const [project, setProject] = useState<ProjectInfo | null>(null);
 	const [selectProjectMode, setSelectProjectMode] = useState<boolean>(false);
 	const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
@@ -49,10 +50,10 @@ export function App({ initialPrompt }: AppProps) {
       		if (detectedProject.isProject && detectedProject.root) {
 				setSelectProjectMode(false);
         		setMessages([
-          		{
-            		role: 'system',
-            		content: `Project detected: ${detectedProject.root}`,
-          		},
+					{
+						role: 'system',
+						content: `Project detected: ${detectedProject.root}`,
+					},
         		]);
       		} else {
 				// For now just use fake options (but here should be project path or names that is in Orbit's global memory)
@@ -123,6 +124,7 @@ export function App({ initialPrompt }: AppProps) {
 			setIsThinking,
 			setSelectProjectMode,
 			setProjectOptions,
+			setIsInitting,
 			project,
 			constructProjectOptions,
 		});
@@ -249,7 +251,7 @@ export function App({ initialPrompt }: AppProps) {
 
 		<Box marginTop={1} flexDirection="column">
 			{messages.map((message, index) => (
-				<Text key={index} dimColor={message.role === 'system'}>
+				<Text key={index} dimColor={message.role === 'system'} color={message.color || 'none'}>
 					{message.role === 'user'
 						? `You: ${message.content}`
 						: message.role === 'agent'
@@ -300,6 +302,14 @@ export function App({ initialPrompt }: AppProps) {
 					placeholder="Type Project Path (FROM HOME)"
 				/>
 			</Box>
+		}
+
+		{
+			isInitting && (
+				<Text color="yellow">
+					<Spinner type="dots" /> Initializing Orbit Context...
+				</Text>
+			)
 		}
 
 		<Box marginTop={1}>
