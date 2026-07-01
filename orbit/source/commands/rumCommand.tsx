@@ -23,9 +23,9 @@ export async function runCommand(input: string, context: CommandContext) {
     context.setMessages((prev) => [
       ...prev,
       {
-        role: 'agent',
+        role: 'system',
         content: `Unknown command: /${commandName}
-        Type /help to see available commands.`,
+Type /help to see available commands.`,
       },
     ]);
 

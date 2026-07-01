@@ -20,16 +20,16 @@ export const commands: OrbitCommand[] = [
             context.setMessages((prev) => [
                 ...prev,
                 {
-                    role: 'agent',
+                    role: 'system',
                     content: `Available Orbit commands:
-                    /help       Show available commands
-                    /switch     Switch Orbit to work on a different project
-                    /init       Initialize Orbit for this project
-                    /scan       Scan current project
-                    /projects   Show remembered projects
-                    /memory     Show project memory
-                    /clear      Clear the screen
-                    /exit       Exit Orbit`,
+/help       Show available commands
+/switch     Switch Orbit to work on a different project
+/init       Initialize Orbit for this project
+/scan       Scan current project
+/projects   Show remembered projects
+/memory     Show project memory
+/clear      Clear the screen
+/exit       Exit Orbit`,
                 },
             ])
         },
@@ -90,7 +90,9 @@ export const commands: OrbitCommand[] = [
         description: "Switch Orbit to work on a different project",
         usage: '/switch',
         handler: (_args, context) => {
-            
+            context.setSelectProjectMode(true);
+            const options = context.constructProjectOptions();
+            context.setProjectOptions(options);
         }
     }
 

@@ -5,27 +5,10 @@ import Spinner from 'ink-spinner';
 import { detectProjectRoot } from './projects/search.js';
 import { validateProjectPath } from './projects/path.js';
 import SelectInput from 'ink-select-input';
-import type { Message } from './commands/context.js'
+import type { Message, ProjectOptions, ProjectInfo } from './commands/context.js'
 import { runCommand } from './commands/rumCommand.js';
-import { getBestCommandCompletion, getCommandSuggestions } from './commands/autocomplete.js';
+import { getBestCommandCompletion, getGhostCompletion } from './commands/autocomplete.js';
 
-
-
-type ProjectInfo = {
-	isProject: boolean;
-	root: string | null;
-	confidence: number;
-	markers: string[];
-	framework?: string;
-	packageManager?: string;
-	testFramework?: string;
-	hasOrbitFolder?: boolean;
-};
-
-type ProjectOptions = {
-	label: string,
-	value: string,
-}
 
 type AppProps = {
 	initialPrompt?: string;
@@ -42,7 +25,7 @@ export function App({ initialPrompt }: AppProps) {
 	const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
 	const [selectedOption, setSelectedOption] = useState<string>("");
 	const [inputPath, setInputPath] = useState<string>("");
-	const suggestions = getCommandSuggestions(query);
+	const ghostCompletetion = getGhostCompletion(query);
 
 	useInput((_input, key) => {
 		if (key.tab) {
@@ -101,25 +84,22 @@ export function App({ initialPrompt }: AppProps) {
 
 
 	const constructProjectOptions = () => {
-		setProjectOptions(
-			[
-				{label: 'Option 1: Orbit', value: 'red'},
-				{label: 'Option 2: Redemption', value: 'yellow'},
-				{label: 'Option 3: Salary', value: 'orange'},
-				{label: 'Option 4: WOW', value: 'blue'},
-				{label: 'Option 5: Add New Project', value: 'add'},
-				{label: 'Option 6: Quit Orbit', value: 'exit'}
-			]
-		)
+		const options = [
+			{ label: 'Option 1: Orbit', value: 'red' },
+			{ label: 'Option 2: Redemption', value: 'yellow' },
+			{ label: 'Option 3: Salary', value: 'orange' },
+			{ label: 'Option 4: WOW', value: 'blue' },
+			{ label: 'Option 5: Add New Project', value: 'add' },
+			{ label: 'Option 6: Quit Orbit', value: 'exit' },
+		];
 		if (project) {
-			setProjectOptions((prev) => 
-				[
-					...prev,
-					{label: "Option 7: Exit Menu", value: 'quit'}
-				]
-			)
+			options.push({
+				label: 'Option 7: Exit Menu',
+				value: 'quit',
+			});
 		}
-	}
+		return options;
+};
 
 
 	const handleSubmitQuery = async (value: string) => {
@@ -141,6 +121,10 @@ export function App({ initialPrompt }: AppProps) {
 			setMessages,
 			setQuery,
 			setIsThinking,
+			setSelectProjectMode,
+			setProjectOptions,
+			project,
+			constructProjectOptions,
 		});
 
 		if (commandHandled) {
@@ -290,15 +274,8 @@ export function App({ initialPrompt }: AppProps) {
 					onSubmit={handleSubmitQuery}
 					placeholder="Ask Orbit to test something"
 				/>
-				{/* Fix the style of this the suggestion component */}
-				{query.startsWith('/') && suggestions.length > 0 && (
-					<Box marginTop={1} flexDirection="column">
-					{suggestions.slice(0, 5).map((command) => (
-						<Text key={command.name} dimColor>
-						/{command.name} — {command.description}
-						</Text>
-					))}
-					</Box>
+				{ghostCompletetion && (
+					<Text dimColor>{ghostCompletetion}</Text>
 				)}
 			</Box>
 		)}

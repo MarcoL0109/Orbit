@@ -122,7 +122,6 @@ export function detectProjectRoot(startDir = process.cwd()): ProjectDetectionRes
     if (parentDir === currentDir || parentDir == homeDir|| currentDir === homeDir) {
       break;
     }
-
     currentDir = parentDir;
   }
 
