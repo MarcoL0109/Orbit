@@ -18,13 +18,15 @@ type AppProps = {
 export function App({ initialPrompt }: AppProps) {
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [query, setQuery] = useState<string>("");
-	const [isBooting, setIsBooting] = useState(true);
-	const [isThinking, setIsThinking] = useState(false);
-	const [isInitting, setIsInitting] = useState(false);
+	const [isBooting, setIsBooting] = useState<boolean>(true);
+	const [isThinking, setIsThinking] = useState<boolean>(false);
+	const [isInitting, setIsInitting] = useState<boolean>(false);
+	const [reInit, setReInit] = useState<boolean>(false);
+	const [confirmReinit, setConfirmReinit] = useState<string>("");
 	const [project, setProject] = useState<ProjectInfo | null>(null);
 	const [selectProjectMode, setSelectProjectMode] = useState<boolean>(false);
 	const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
-	const [selectedOption, setSelectedOption] = useState<string>("");
+	const [selectedProjectOption, setSelectedProjectOption] = useState<string>("");
 	const [inputPath, setInputPath] = useState<string>("");
 	const ghostCompletetion = getGhostCompletion(query);
 
@@ -73,13 +75,21 @@ export function App({ initialPrompt }: AppProps) {
 	}, []);
 
 
-	const handleSelect = (item: any) => {
-		setSelectedOption(item.value);
-		if (selectedOption === 'exit') {
+	const handleProjectSelect = (item: any) => {
+		setSelectedProjectOption(item.value);
+		if (selectedProjectOption === 'exit') {
 			process.exit(0);
 		}
-		if (selectedOption === 'quit') {
+		if (selectedProjectOption === 'quit') {
 			setSelectProjectMode(false);
+		}
+	}
+
+
+	const handleReInitSelect = (item: any) => {
+		setConfirmReinit(item.value);
+		if (confirmReinit === 'no') {
+			setReInit(false);
 		}
 	}
 
@@ -125,6 +135,7 @@ export function App({ initialPrompt }: AppProps) {
 			setSelectProjectMode,
 			setProjectOptions,
 			setIsInitting,
+			setReInit,
 			project,
 			constructProjectOptions,
 		});
@@ -186,7 +197,7 @@ export function App({ initialPrompt }: AppProps) {
 		}
 		setSelectProjectMode(false);
 		setInputPath("");
-		setSelectedOption("");
+		setSelectedProjectOption("");
 	}
 
 
@@ -261,10 +272,10 @@ export function App({ initialPrompt }: AppProps) {
 			))}
 		</Box>
 
-		{isBooting || selectProjectMode ? (
+		{isBooting || selectProjectMode || reInit ? (
 			<Box marginTop={1}>
 				<Text color="yellow">
-				<Spinner type="dots" /> Detecting project...
+					<Spinner type="dots" /> Selection Menu In Progress...
 				</Text>
 			</Box>
 			) : (
@@ -287,13 +298,13 @@ export function App({ initialPrompt }: AppProps) {
 				<Text>Select an option (Use arrow keys and Enter):</Text>
 				<SelectInput
 					items={projectOptions}
-					onSelect={handleSelect}
+					onSelect={handleProjectSelect}
 				/>
 			</Box>
 		)}
 
 		{
-			selectedOption === "add" &&
+			selectedProjectOption === "add" &&
 			<Box marginTop={1}>
 				<TextInput
 					value={inputPath}
@@ -302,6 +313,18 @@ export function App({ initialPrompt }: AppProps) {
 					placeholder="Type Project Path (FROM HOME)"
 				/>
 			</Box>
+		}
+
+		{
+			reInit && (
+				<Box flexDirection="column">
+					<Text>Orbit already have context initialized for this project. Are you sure you want to re-initialize?</Text>
+					<SelectInput
+						items={[{label: "Yes", value: 'yes'}, {label: "No", value: 'no'}]}
+						onSelect={handleReInitSelect}
+					/>
+				</Box>
+			)
 		}
 
 		{

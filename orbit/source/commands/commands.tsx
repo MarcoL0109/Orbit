@@ -54,7 +54,8 @@ export const commands: OrbitCommand[] = [
             // Not fully done yet, still need some TUI display to indicate is either initializing, success or failed
             // Also can't really allow user to use this command if it is not in a valid project, but if user is not in a project they are forced to select one at the beginning so is this still an issue??
             // And error checking...
-            if (context.project) {
+            // Also when the .orbit folder is in here, if user want to re-initialize again, we need to ask for confirmation
+            if (context.project && !context.project.hasOrbitFolder) {
                 try {
                     context.setIsInitting(true);
                     initOrbitProject({projectName: "Orbit", projectRoot: context.project?.root || process.cwd()});
@@ -66,6 +67,8 @@ export const commands: OrbitCommand[] = [
                             color: 'green'
                         },
                     ]);
+                    // Mark the current project to have the .orbit folder
+                    context.project.hasOrbitFolder = true;
                 } catch (error) {
                     context.setMessages([
                         {
@@ -75,6 +78,8 @@ export const commands: OrbitCommand[] = [
                         },
                     ]);
                 }
+            } else if (context.project?.hasOrbitFolder) {
+                context.setReInit(true);
             }
         },
     },
