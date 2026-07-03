@@ -8,6 +8,7 @@ import SelectInput from 'ink-select-input';
 import type { Message, ProjectOptions, ProjectInfo } from './commands/context.js'
 import { runCommand } from './commands/rumCommand.js';
 import { getBestCommandCompletion, getGhostCompletion } from './commands/autocomplete.js';
+import { initOrbitProject } from './init/init.js';
 
 
 type AppProps = {
@@ -90,6 +91,16 @@ export function App({ initialPrompt }: AppProps) {
 		setConfirmReinit(item.value);
 		if (confirmReinit === 'no') {
 			setReInit(false);
+		} else {
+			initOrbitProject({projectName: "Orbit", projectRoot: project?.root || process.cwd()})
+			setMessages([
+				{
+					role: 'system',
+					content: `Orbit context initialized`,
+					color: 'green'
+				},
+			]);
+			setReInit(false);
 		}
 	}
 
@@ -110,7 +121,7 @@ export function App({ initialPrompt }: AppProps) {
 			});
 		}
 		return options;
-};
+	};
 
 
 	const handleSubmitQuery = async (value: string) => {
@@ -293,7 +304,8 @@ export function App({ initialPrompt }: AppProps) {
 			</Box>
 		)}
 
-		{selectProjectMode && (
+		{
+			selectProjectMode && (
 			<Box flexDirection="column">
 				<Text>Select an option (Use arrow keys and Enter):</Text>
 				<SelectInput
