@@ -1,5 +1,6 @@
 import type { CommandContext } from "./context.js";
 import { initOrbitProject } from '../init/init.js';
+import type { InitFileAction } from '../init/init.js';
 
 
 export type OrbitCommand = {
@@ -9,6 +10,23 @@ export type OrbitCommand = {
     usage: string;
     handler: (args: string[], context: CommandContext) => Promise<void> | void;
 };
+
+
+export function formatInitResult(files: InitFileAction[]) {
+    const created = files.filter((file) => file.action === 'created');
+    const createdText =
+    created.length > 0
+        ? created.map((file) => `✓ ${file.relativePath}`).join('\n')
+        : 'None';
+
+    return `Orbit initialized this project.
+
+Created:
+${createdText}
+
+Next:
+Run /scan to build the project index.`;
+}
 
 
 export const commands: OrbitCommand[] = [
@@ -38,7 +56,7 @@ export const commands: OrbitCommand[] = [
 
     {
         name: 'scan',
-        aliases: ['search'],
+        aliases: ['scan'],
         description: 'Scan the current project',
         usage: '/scan',
         handler: async () => {
@@ -58,16 +76,16 @@ export const commands: OrbitCommand[] = [
             if (context.project && !context.project.hasOrbitFolder) {
                 try {
                     context.setIsInitting(true);
-                    initOrbitProject({projectName: "Orbit", projectRoot: context.project?.root || process.cwd()});
+                    const result = initOrbitProject({projectName: "Orbit", projectRoot: context.project?.root || process.cwd()});
                     context.setIsInitting(false);
-                    context.setMessages([
+                    context.setMessages((prev) => [
+                        ...prev,
                         {
-                            role: 'system',
-                            content: `Orbit context initialized`,
-                            color: 'green'
+                            role: 'agent',
+                            content: formatInitResult(result.files),
+                            color: 'green',
                         },
                     ]);
-                    // Mark the current project to have the .orbit folder
                     context.project.hasOrbitFolder = true;
                 } catch (error) {
                     context.setMessages([
@@ -79,7 +97,14 @@ export const commands: OrbitCommand[] = [
                     ]);
                 }
             } else if (context.project?.hasOrbitFolder) {
-                context.setReInit(true);
+                context.setMessages((prev) => [
+                    ...prev,
+                    {
+                        role: 'system',
+                        content: `Orbit context is initialized. You can use /scan to refresh the context or delete .orbit folder and do /init again`,
+                        color: 'yellow',
+                    },
+                ]);
             }
         },
     },

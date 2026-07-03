@@ -8,7 +8,6 @@ import SelectInput from 'ink-select-input';
 import type { Message, ProjectOptions, ProjectInfo } from './commands/context.js'
 import { runCommand } from './commands/rumCommand.js';
 import { getBestCommandCompletion, getGhostCompletion } from './commands/autocomplete.js';
-import { initOrbitProject } from './init/init.js';
 
 
 type AppProps = {
@@ -23,7 +22,6 @@ export function App({ initialPrompt }: AppProps) {
 	const [isThinking, setIsThinking] = useState<boolean>(false);
 	const [isInitting, setIsInitting] = useState<boolean>(false);
 	const [reInit, setReInit] = useState<boolean>(false);
-	const [confirmReinit, setConfirmReinit] = useState<string>("");
 	const [project, setProject] = useState<ProjectInfo | null>(null);
 	const [selectProjectMode, setSelectProjectMode] = useState<boolean>(false);
 	const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
@@ -85,25 +83,6 @@ export function App({ initialPrompt }: AppProps) {
 			setSelectProjectMode(false);
 		}
 	}
-
-
-	const handleReInitSelect = (item: any) => {
-		setConfirmReinit(item.value);
-		if (confirmReinit === 'no') {
-			setReInit(false);
-		} else {
-			initOrbitProject({projectName: "Orbit", projectRoot: project?.root || process.cwd()})
-			setMessages([
-				{
-					role: 'system',
-					content: `Orbit context initialized`,
-					color: 'green'
-				},
-			]);
-			setReInit(false);
-		}
-	}
-
 
 	const constructProjectOptions = () => {
 		const options = [
@@ -325,18 +304,6 @@ export function App({ initialPrompt }: AppProps) {
 					placeholder="Type Project Path (FROM HOME)"
 				/>
 			</Box>
-		}
-
-		{
-			reInit && (
-				<Box flexDirection="column">
-					<Text>Orbit already have context initialized for this project. Are you sure you want to re-initialize?</Text>
-					<SelectInput
-						items={[{label: "Yes", value: 'yes'}, {label: "No", value: 'no'}]}
-						onSelect={handleReInitSelect}
-					/>
-				</Box>
-			)
 		}
 
 		{
