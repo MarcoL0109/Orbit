@@ -84,6 +84,7 @@ export function App({ initialPrompt }: AppProps) {
 		}
 	}
 
+	
 	const constructProjectOptions = () => {
 		const options = [
 			{ label: 'Option 1: Orbit', value: 'red' },

@@ -1,6 +1,8 @@
 import type { CommandContext } from "./context.js";
 import { initOrbitProject } from '../init/init.js';
 import type { InitFileAction } from '../init/init.js';
+import {readGlobalProjects, formatProjectsForTui} from '../projects/read.js';
+
 
 
 export type OrbitCommand = {
@@ -112,9 +114,31 @@ export const commands: OrbitCommand[] = [
         name: 'projects',
         description: 'Show remembered projects',
         usage: '/projects',
-        handler: async () => {
-            // show projects from ~/.orbit/projects.json
-    },
+        handler: async (_args, context) => {
+            try {
+                const projectsFile = readGlobalProjects();
+                const content = formatProjectsForTui(projectsFile);
+
+                context.setMessages((prev) => [
+                    ...prev,
+                    {
+                    role: 'agent',
+                    content,
+                    },
+                ]);
+                } 
+            catch (error) {
+                context.setMessages((prev) => [
+                    ...prev,
+                    {
+                    role: 'agent',
+                    content: `Could not read projects.json: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`,
+                    },
+                ]);
+            }
+        },
     },
     {
         name: 'memory',

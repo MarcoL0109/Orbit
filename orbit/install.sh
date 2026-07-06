@@ -6,6 +6,10 @@ ORBIT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="$HOME/.orbit"
 BIN_DIR="$INSTALL_DIR/bin"
 GLOBAL_ORBIT_BIN="$BIN_DIR/orbit"
+CONFIG_FILE="$INSTALL_DIR/config.json"
+PROJECT_FILE="$INSTALL_DIR/projects.json"
+PREFERENCE_FILE="$INSTALL_DIR/memory/preference.md"
+
 
 echo "Installing Orbit..."
 
@@ -15,6 +19,7 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 
 mkdir -p "$BIN_DIR"
+mkdir -p "$INSTALL_DIR/memory"
 
 cd "$ORBIT_ROOT"
 
@@ -26,7 +31,61 @@ else
   npm run build
 fi
 
-cat > "$GLOBAL_ORBIT_BIN" <<EOF
+if [ ! -f "$CONFIG_FILE" ]; then
+  cat > "$CONFIG_FILE" << EOF
+{
+  "version": 1,
+  "approvalMode": "ask",
+  "defaultBrowser": "chromium",
+  "defaultModel": "gpt-5.2",
+  "telemetry": false,
+  "lastOpenedProject": null
+}
+EOF
+fi
+
+ECHO "Initialized the Orbit Configuration File"
+
+if [ ! -f "$PROJECT_FILE" ]; then
+  cat > "$PROJECT_FILE" << EOF
+{
+  "projects": [
+    {
+      "name": "shop-app",
+      "path": "/Users/marcolau/Documents/GitHub/shop-app",
+      "framework": "Next.js",
+      "packageManager": "pnpm",
+      "testFramework": "Playwright",
+      "lastOpenedAt": "2026-07-05T06:18:00.000Z",
+      "openCount": 3
+    }
+  ]
+}
+EOF
+fi
+
+ECHO "Initialized the Orbit Project File"
+
+if [ ! -f "$PREFERENCE_FILE" ]; then
+  cat > "$PREFERENCE_FILE" << 'EOF'
+# Orbit User Preferences
+
+## QA Preferences
+
+- Prefer Playwright tests.
+- Prefer role-based selectors.
+- Ask before modifying files.
+- Ask before running commands.
+
+## Style
+
+- Keep generated test files simple.
+- Explain risky changes before applying them.
+EOF
+fi
+ECHO "Initialized the Orbit Preference File"
+
+cat > "$GLOBAL_ORBIT_BIN" << EOF
 #!/usr/bin/env bash
 node "$ORBIT_ROOT/dist/cli.js" "\$@"
 EOF
