@@ -129,6 +129,7 @@ export function App({ initialPrompt }: AppProps) {
 			setReInit,
 			project,
 			constructProjectOptions,
+			setProject,
 		});
 
 		if (commandHandled) {

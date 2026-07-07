@@ -133,3 +133,23 @@ export function detectProjectRoot(startDir = process.cwd()): ProjectDetectionRes
     hasOrbitFolder: false,
   };
 }
+
+export function getProjectDisplayName(projectRoot: string) {
+  const packageJsonPath = path.join(projectRoot, 'package.json');
+
+  if (fs.existsSync(packageJsonPath)) {
+    try {
+      const packageJson = JSON.parse(
+        fs.readFileSync(packageJsonPath, 'utf8'),
+      ) as {name?: string};
+
+      if (packageJson.name) {
+        return packageJson.name;
+      }
+    } catch {
+      // Ignore invalid package.json and fall back to folder name
+    }
+  }
+
+  return path.basename(projectRoot);
+}

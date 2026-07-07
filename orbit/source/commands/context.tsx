@@ -36,4 +36,5 @@ export type CommandContext = {
     setReInit: React.Dispatch<React.SetStateAction<boolean>>;
     project: ProjectInfo | null;
     constructProjectOptions: () => ProjectOptions[];
+    setProject: React.Dispatch<React.SetStateAction<ProjectInfo | null>>;
 };

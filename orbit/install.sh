@@ -47,19 +47,9 @@ fi
 ECHO "Initialized the Orbit Configuration File"
 
 if [ ! -f "$PROJECT_FILE" ]; then
-  cat > "$PROJECT_FILE" << EOF
+cat > "$PROJECT_FILE" << EOF
 {
-  "projects": [
-    {
-      "name": "shop-app",
-      "path": "/Users/marcolau/Documents/GitHub/shop-app",
-      "framework": "Next.js",
-      "packageManager": "pnpm",
-      "testFramework": "Playwright",
-      "lastOpenedAt": "2026-07-05T06:18:00.000Z",
-      "openCount": 3
-    }
-  ]
+  "projects": []
 }
 EOF
 fi

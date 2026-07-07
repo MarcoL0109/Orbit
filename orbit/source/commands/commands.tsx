@@ -1,7 +1,9 @@
 import type { CommandContext } from "./context.js";
 import { initOrbitProject } from '../init/init.js';
 import type { InitFileAction } from '../init/init.js';
-import {readGlobalProjects, formatProjectsForTui} from '../projects/read.js';
+import {readGlobalProjects, formatProjectsForTui} from '../projects/readProjectMem.js';
+import { rememberProject } from "../init/initMark.js";
+import { getProjectDisplayName } from "../projects/search.js";
 
 
 
@@ -25,9 +27,7 @@ export function formatInitResult(files: InitFileAction[]) {
 
 Created:
 ${createdText}
-
-Next:
-Run /scan to build the project index.`;
+`;
 }
 
 
@@ -46,7 +46,6 @@ export const commands: OrbitCommand[] = [
 /help       Show available commands
 /switch     Switch Orbit to work on a different project
 /init       Initialize Orbit for this project
-/scan       Scan current project
 /projects   Show remembered projects
 /memory     Show project memory
 /clear      Clear the screen
@@ -57,62 +56,98 @@ export const commands: OrbitCommand[] = [
     },
 
     {
-        name: 'scan',
-        aliases: ['scan'],
-        description: 'Scan the current project',
-        usage: '/scan',
-        handler: async () => {
-            // run scanProject()
-        },
-    },
-
-    {
         name: 'init',
         description: 'Create .orbit project context',
         usage: '/init',
         handler: async (_args, context) => {
-            // Not fully done yet, still need some TUI display to indicate is either initializing, success or failed
-            // Also can't really allow user to use this command if it is not in a valid project, but if user is not in a project they are forced to select one at the beginning so is this still an issue??
-            // And error checking...
-            // Also when the .orbit folder is in here, if user want to re-initialize again, we need to ask for confirmation
-            if (context.project && !context.project.hasOrbitFolder) {
-                try {
-                    context.setIsInitting(true);
-                    const result = initOrbitProject({projectName: "Orbit", projectRoot: context.project?.root || process.cwd()});
-                    context.setIsInitting(false);
-                    context.setMessages((prev) => [
-                        ...prev,
-                        {
-                            role: 'agent',
-                            content: formatInitResult(result.files),
-                            color: 'green',
-                        },
-                    ]);
-                    context.project.hasOrbitFolder = true;
-                } catch (error) {
-                    context.setMessages([
-                        {
-                            role: 'system',
-                            content: `Fail to Initalize Orbit Context`,
-                            color: 'red'
-                        },
-                    ]);
+            if (!context.project) {
+                context.setMessages((prev) => [
+                ...prev,
+                {
+                    role: 'system',
+                    content: 'No valid project selected. Please select or open a project first.',
+                    color: 'red',
+                },
+                ]);
+                return;
+            }
+
+            if (context.project.hasOrbitFolder) {
+                context.setMessages((prev) => [
+                ...prev,
+                {
+                    role: 'system',
+                    content:
+                    'Orbit context is already initialized. You can use /scan to refresh the context, or delete the .orbit folder and run /init again.',
+                    color: 'yellow',
+                },
+                ]);
+                return;
+            }
+
+            try {
+                context.setIsInitting(true);
+                let projectName = 'Default'
+                if (context.project.root) {
+                    projectName = getProjectDisplayName(context.project.root);
                 }
-            } else if (context.project?.hasOrbitFolder) {
+
+                const result = initOrbitProject({
+                    projectName: projectName,
+                    projectRoot: context.project.root || '',
+                    framework: context.project.framework,
+                    packageManager: context.project.packageManager,
+                    testFramework: context.project.testFramework,
+                });
+
+                rememberProject({
+                    name: projectName,
+                    path: context.project.root || '',
+                    framework: context.project.framework ?? null,
+                    packageManager: context.project.packageManager ?? null,
+                    testFramework: context.project.testFramework ?? null,
+                    lastScannedAt: null,
+                });
+
                 context.setMessages((prev) => [
                     ...prev,
                     {
-                        role: 'system',
-                        content: `Orbit context is initialized. You can use /scan to refresh the context or delete .orbit folder and do /init again`,
-                        color: 'yellow',
+                        role: 'agent',
+                        content: `${formatInitResult(result.files)}
+
+Global memory updated:
+✓ ~/.orbit/projects.json`,
+        color: 'green',
                     },
                 ]);
+
+                context.setProject?.((prev) =>
+                prev
+                    ? {
+                        ...prev,
+                        hasOrbitFolder: true,
+                    }
+                    : prev,
+                );
+            } catch (error) {
+                context.setMessages((prev) => [
+                ...prev,
+                {
+                    role: 'system',
+                    content: `Failed to initialize Orbit context: ${
+                    error instanceof Error ? error.message : String(error)
+                    }`,
+                    color: 'red',
+                },
+                ]);
+            } finally {
+                context.setIsInitting(false);
             }
-        },
+        }
     },
     {
         name: 'projects',
-        description: 'Show remembered projects',
+        description: 'Show tracked projects',
         usage: '/projects',
         handler: async (_args, context) => {
             try {
@@ -122,8 +157,8 @@ export const commands: OrbitCommand[] = [
                 context.setMessages((prev) => [
                     ...prev,
                     {
-                    role: 'agent',
-                    content,
+                        role: 'system',
+                        content,
                     },
                 ]);
                 } 
@@ -131,7 +166,7 @@ export const commands: OrbitCommand[] = [
                 context.setMessages((prev) => [
                     ...prev,
                     {
-                    role: 'agent',
+                    role: 'system',
                     content: `Could not read projects.json: ${
                         error instanceof Error ? error.message : String(error)
                     }`,
