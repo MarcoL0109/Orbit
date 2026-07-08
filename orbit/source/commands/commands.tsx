@@ -1,8 +1,5 @@
 import type { CommandContext } from "./context.js";
-import { initOrbitProject } from '../init/init.js';
-import type { InitFileAction } from '../init/init.js';
 import {readGlobalProjects, formatProjectsForTui} from '../projects/readProjectMem.js';
-import { rememberProject } from "../init/initMark.js";
 import { getProjectDisplayName } from "../projects/search.js";
 
 
@@ -15,20 +12,6 @@ export type OrbitCommand = {
     handler: (args: string[], context: CommandContext) => Promise<void> | void;
 };
 
-
-export function formatInitResult(files: InitFileAction[]) {
-    const created = files.filter((file) => file.action === 'created');
-    const createdText =
-    created.length > 0
-        ? created.map((file) => `✓ ${file.relativePath}`).join('\n')
-        : 'None';
-
-    return `Orbit initialized this project.
-
-Created:
-${createdText}
-`;
-}
 
 
 export const commands: OrbitCommand[] = [
@@ -84,65 +67,14 @@ export const commands: OrbitCommand[] = [
                 ]);
                 return;
             }
-
-            try {
-                context.setIsInitting(true);
-                let projectName = 'Default'
-                if (context.project.root) {
-                    projectName = getProjectDisplayName(context.project.root);
-                }
-
-                const result = initOrbitProject({
-                    projectName: projectName,
-                    projectRoot: context.project.root || '',
-                    framework: context.project.framework,
-                    packageManager: context.project.packageManager,
-                    testFramework: context.project.testFramework,
-                });
-
-                rememberProject({
-                    name: projectName,
-                    path: context.project.root || '',
-                    framework: context.project.framework ?? null,
-                    packageManager: context.project.packageManager ?? null,
-                    testFramework: context.project.testFramework ?? null,
-                    lastScannedAt: null,
-                });
-
-                context.setMessages((prev) => [
-                    ...prev,
-                    {
-                        role: 'agent',
-                        content: `${formatInitResult(result.files)}
-
-Global memory updated:
-✓ ~/.orbit/projects.json`,
-        color: 'green',
-                    },
-                ]);
-
-                context.setProject?.((prev) =>
-                prev
-                    ? {
-                        ...prev,
-                        hasOrbitFolder: true,
-                    }
-                    : prev,
-                );
-            } catch (error) {
-                context.setMessages((prev) => [
-                ...prev,
-                {
-                    role: 'system',
-                    content: `Failed to initialize Orbit context: ${
-                    error instanceof Error ? error.message : String(error)
-                    }`,
-                    color: 'red',
-                },
-                ]);
-            } finally {
-                context.setIsInitting(false);
+            context.setIsInitting(true);
+            let projectName = 'Default'
+            if (context.project.root) {
+                projectName = getProjectDisplayName(context.project.root);
             }
+
+            context.setConfirmName(projectName);
+            context.setCheckName(true);
         }
     },
     {
@@ -174,14 +106,6 @@ Global memory updated:
                 ]);
             }
         },
-    },
-    {
-        name: 'memory',
-        description: 'Show project memory',
-        usage: '/memory',
-        handler: async () => {
-            // read .orbit/memory
-    },
     },
     {
         name: 'exit',

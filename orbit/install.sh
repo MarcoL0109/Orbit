@@ -46,13 +46,13 @@ fi
 
 ECHO "Initialized the Orbit Configuration File"
 
-if [ ! -f "$PROJECT_FILE" ]; then
+# if [ ! -f "$PROJECT_FILE" ]; then
 cat > "$PROJECT_FILE" << EOF
 {
   "projects": []
 }
 EOF
-fi
+# fi
 
 ECHO "Initialized the Orbit Project File"
 

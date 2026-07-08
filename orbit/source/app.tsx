@@ -5,6 +5,9 @@ import Spinner from 'ink-spinner';
 import { detectProjectRoot } from './projects/search.js';
 import { validateProjectPath } from './projects/path.js';
 import SelectInput from 'ink-select-input';
+import { rememberProject } from "./init/initMark.js";
+import { initOrbitProject } from "./init/init.js";
+import type { InitFileAction } from './init/init.js';
 import type { Message, ProjectOptions, ProjectInfo } from './commands/context.js'
 import { runCommand } from './commands/rumCommand.js';
 import { getBestCommandCompletion, getGhostCompletion } from './commands/autocomplete.js';
@@ -27,6 +30,8 @@ export function App({ initialPrompt }: AppProps) {
 	const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
 	const [selectedProjectOption, setSelectedProjectOption] = useState<string>("");
 	const [inputPath, setInputPath] = useState<string>("");
+	const [checkName, setCheckName] = useState<boolean>(false);
+	const [confirmName, setConfirmName] = useState<string>("");
 	const ghostCompletetion = getGhostCompletion(query);
 
 	useInput((_input, key) => {
@@ -58,8 +63,9 @@ export function App({ initialPrompt }: AppProps) {
         		]);
       		} else {
 				// For now just use fake options (but here should be project path or names that is in Orbit's global memory)
+				const options = constructProjectOptions();
+				setProjectOptions(options);
 				setSelectProjectMode(true);
-				constructProjectOptions();
 				setMessages([
 					{
 						role: 'system',
@@ -104,6 +110,21 @@ export function App({ initialPrompt }: AppProps) {
 	};
 
 
+	function formatInitResult(files: InitFileAction[]) {
+		const created = files.filter((file) => file.action === 'created');
+		const createdText =
+		created.length > 0
+			? created.map((file) => `✓ ${file.relativePath}`).join('\n')
+			: 'None';
+	
+		return `Orbit initialized this project.
+	
+Created:
+${createdText}
+`;
+	}
+
+
 	const handleSubmitQuery = async (value: string) => {
 		const prompt = value.trim();
 
@@ -130,6 +151,8 @@ export function App({ initialPrompt }: AppProps) {
 			project,
 			constructProjectOptions,
 			setProject,
+			setCheckName,
+			setConfirmName,
 		});
 
 		if (commandHandled) {
@@ -190,6 +213,67 @@ export function App({ initialPrompt }: AppProps) {
 		setSelectProjectMode(false);
 		setInputPath("");
 		setSelectedProjectOption("");
+	}
+
+
+	const handleConfirmNameInit = () => {
+		if (project) {
+			try {
+				const result = initOrbitProject({
+					projectName: confirmName,
+					projectRoot: project.root || '',
+					framework: project.framework,
+					packageManager: project.packageManager,
+					testFramework: project.testFramework,
+				});
+			
+				rememberProject({
+					name: confirmName,
+					path: project.root || '',
+					framework: project.framework ?? null,
+					packageManager: project.packageManager ?? null,
+					testFramework: project.testFramework ?? null,
+					lastScannedAt: null,
+				});
+			
+				setMessages((prev) => [
+					...prev,
+					{
+						role: 'agent',
+						content: `${formatInitResult(result.files)}
+			
+Global memory updated:
+✓ ~/.orbit/projects.json`,
+						color: 'green',
+					},
+				]);
+			
+				setProject?.((prev) =>
+					prev
+						? {
+							...prev,
+							hasOrbitFolder: true,
+						}
+						: prev,
+				);
+			}
+			catch (error) {
+				setMessages((prev) => [
+				...prev,
+				{
+					role: 'system',
+					content: `Failed to initialize Orbit context: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+					color: 'red',
+				},
+				]);
+			} finally {
+				setIsInitting(false);
+				setCheckName(false);
+				setConfirmName("");
+			}
+		}
 	}
 
 
@@ -254,7 +338,7 @@ export function App({ initialPrompt }: AppProps) {
 
 		<Box marginTop={1} flexDirection="column">
 			{messages.map((message, index) => (
-				<Text key={index} dimColor={message.role === 'system'} color={message.color || 'none'}>
+				<Text key={index} color={message.color || 'none'}>
 					{message.role === 'user'
 						? `You: ${message.content}`
 						: message.role === 'agent'
@@ -313,6 +397,20 @@ export function App({ initialPrompt }: AppProps) {
 				<Text color="yellow">
 					<Spinner type="dots" /> Initializing Orbit Context...
 				</Text>
+			)
+		}
+
+		{
+			checkName && (
+				<Box marginTop={1} flexDirection='column'>
+					<Text>The following name is detected. You can type in your own</Text>
+					<TextInput
+						value={confirmName}
+						onChange={setConfirmName}
+						onSubmit={handleConfirmNameInit}
+						placeholder="Your Project Name"
+					/>
+				</Box>
 			)
 		}
 

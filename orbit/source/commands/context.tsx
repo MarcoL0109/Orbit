@@ -37,4 +37,6 @@ export type CommandContext = {
     project: ProjectInfo | null;
     constructProjectOptions: () => ProjectOptions[];
     setProject: React.Dispatch<React.SetStateAction<ProjectInfo | null>>;
+    setCheckName: React.Dispatch<React.SetStateAction<boolean>>;
+    setConfirmName: React.Dispatch<React.SetStateAction<string>>;
 };
