@@ -46,6 +46,7 @@ fi
 
 ECHO "Initialized the Orbit Configuration File"
 
+# For testing purposes, I need to command the file checking if-statement in case we want to overwrite the project json file
 # if [ ! -f "$PROJECT_FILE" ]; then
 cat > "$PROJECT_FILE" << EOF
 {
