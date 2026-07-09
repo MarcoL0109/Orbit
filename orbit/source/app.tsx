@@ -11,6 +11,7 @@ import type { InitFileAction } from './init/init.js';
 import type { Message, ProjectOptions, ProjectInfo } from './commands/context.js'
 import { runCommand } from './commands/rumCommand.js';
 import { getBestCommandCompletion, getGhostCompletion } from './commands/autocomplete.js';
+import { readGlobalProjects } from './projects/readProjectMem.js';
 
 
 type AppProps = {
@@ -62,7 +63,6 @@ export function App({ initialPrompt }: AppProps) {
 					},
         		]);
       		} else {
-				// For now just use fake options (but here should be project path or names that is in Orbit's global memory)
 				const options = constructProjectOptions();
 				setProjectOptions(options);
 				setSelectProjectMode(true);
@@ -92,20 +92,28 @@ export function App({ initialPrompt }: AppProps) {
 
 	
 	const constructProjectOptions = () => {
-		const options = [
-			{ label: 'Option 1: Orbit', value: 'red' },
-			{ label: 'Option 2: Redemption', value: 'yellow' },
-			{ label: 'Option 3: Salary', value: 'orange' },
-			{ label: 'Option 4: WOW', value: 'blue' },
-			{ label: 'Option 5: Add New Project', value: 'add' },
-			{ label: 'Option 6: Quit Orbit', value: 'exit' },
-		];
+		const projectJsonList = readGlobalProjects();
+		const options = projectJsonList.projects.map((project) => ({
+							label: `->${project.name}`,
+							value: project.name,
+						}));
+		options.push({
+			label: '-> Add New Project',
+			value: 'add',
+		});
+
 		if (project) {
 			options.push({
-				label: 'Option 7: Exit Menu',
+				label: '-> Exit Menu',
 				value: 'quit',
 			});
 		}
+
+		options.push({
+			label: '-> Quit Orbit',
+			value: 'exit',
+		});
+
 		return options;
 	};
 
