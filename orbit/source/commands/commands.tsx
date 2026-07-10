@@ -1,7 +1,34 @@
 import type { CommandContext } from "./context.js";
 import {readGlobalProjects, formatProjectsForTui} from '../projects/readProjectMem.js';
 import { getProjectDisplayName } from "../projects/search.js";
+import { askModel } from '../ai_models/prompt.js';
 
+
+export function parseCommand(input: string) {
+    const trimmed = input.trim();
+
+    if (!trimmed.startsWith('/')) {
+        return null;
+    }
+
+    const [rawCommand, ...args] = trimmed.slice(1).split(/\s+/);
+    if (rawCommand) {
+        const commandName = rawCommand.toLowerCase();
+        const command = commands.find(
+            (cmd) =>
+                cmd.name === commandName ||
+                cmd.aliases?.includes(commandName),
+        );
+
+        return {
+            command,
+            commandName,
+            args,
+            raw: trimmed,
+        };
+    }
+    return null;
+}
 
 
 export type OrbitCommand = {
@@ -11,7 +38,6 @@ export type OrbitCommand = {
     usage: string;
     handler: (args: string[], context: CommandContext) => Promise<void> | void;
 };
-
 
 
 export const commands: OrbitCommand[] = [
@@ -77,6 +103,7 @@ export const commands: OrbitCommand[] = [
             context.setCheckName(true);
         }
     },
+
     {
         name: 'projects',
         description: 'Show tracked projects',
@@ -107,6 +134,7 @@ export const commands: OrbitCommand[] = [
             }
         },
     },
+
     {
         name: 'exit',
         description: 'Exit Orbit',
@@ -115,6 +143,7 @@ export const commands: OrbitCommand[] = [
             process.exit(0);
         },
     },
+
     {
         name: 'clear',
         description: 'Clear Orbit terminal screen',
@@ -123,6 +152,7 @@ export const commands: OrbitCommand[] = [
             context.setMessages([]);
         }
     },
+
     {
         name: "switch",
         description: "Switch Orbit to work on a different project",
@@ -132,32 +162,54 @@ export const commands: OrbitCommand[] = [
             const options = context.constructProjectOptions();
             context.setProjectOptions(options);
         }
-    }
+    },
 
+    {
+        name: "test-model",
+        description: "Just a mock testing to see whether the model is working in Orbit",
+        usage: '/ai <prompt>',
+        handler: async (_args, context) => {
+            const prompt = _args.join(' ').trim();
+
+            if (!prompt) {
+                context.setMessages((prev) => [
+                    ...prev,
+                    {
+                        role: 'agent',
+                        content: 'Usage: /orbit <prompt>',
+                        color: 'yellow',
+                    },
+                ]);
+                return;
+            }
+
+            try {
+                context.setIsThinking(true);
+
+                const response = await askModel({prompt});
+
+                context.setMessages((prev) => [
+                    ...prev,
+                    {
+                        role: 'agent',
+                        content: response,
+                        color: 'green',
+                    },
+                ]);
+            } catch (error) {
+                context.setMessages((prev) => [
+                    ...prev,
+                    {
+                        role: 'system',
+                        content: `AI request failed: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`,
+                    color: 'red',
+                    },
+                ]);
+            } finally {
+                context.setIsThinking(false);
+            }
+        }
+    }
 ];
-
-export function parseCommand(input: string) {
-    const trimmed = input.trim();
-
-    if (!trimmed.startsWith('/')) {
-        return null;
-    }
-
-    const [rawCommand, ...args] = trimmed.slice(1).split(/\s+/);
-    if (rawCommand) {
-        const commandName = rawCommand.toLowerCase();
-        const command = commands.find(
-            (cmd) =>
-                cmd.name === commandName ||
-                cmd.aliases?.includes(commandName),
-        );
-
-        return {
-            command,
-            commandName,
-            args,
-            raw: trimmed,
-        };
-    }
-    return null;
-}
