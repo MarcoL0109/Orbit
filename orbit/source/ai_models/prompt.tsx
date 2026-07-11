@@ -9,7 +9,8 @@ type AskModelOptions = {
 
 export async function askModel({
   prompt,
-  model = 'gpt-5.2', 
+  model = 'gpt-5.2',
+  signal,
 }: AskModelOptions): Promise<string> {
   const client = createOpenAIClient();
 
@@ -30,6 +31,9 @@ Rules:
 - At any point, do not attempt to read or utilize any variables in the .env file without any approval
 `,
     input: prompt,
+  },
+  {
+    signal,
   });
 
   return response.output_text;

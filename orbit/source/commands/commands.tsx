@@ -51,13 +51,15 @@ export const commands: OrbitCommand[] = [
                 ...prev,
                 {
                     role: 'system',
-                    content: `Available Orbit commands:
+                    content: `
+                    Available Orbit commands:
 /help       Show available commands
 /switch     Switch Orbit to work on a different project
 /init       Initialize Orbit for this project
 /projects   Show remembered projects
 /memory     Show project memory
 /clear      Clear the screen
+/abort      Abort ongoing tasks that is currently running
 /exit       Exit Orbit`,
                 },
             ])
