@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
@@ -33,7 +33,9 @@ export function App({ initialPrompt }: AppProps) {
 	const [inputPath, setInputPath] = useState<string>("");
 	const [checkName, setCheckName] = useState<boolean>(false);
 	const [confirmName, setConfirmName] = useState<string>("");
+	const currentAbortControllerRef = useRef<AbortController | null>(null);
 	const ghostCompletetion = getGhostCompletion(query);
+
 
 	useInput((_input, key) => {
 		if (key.tab) {
@@ -78,6 +80,30 @@ export function App({ initialPrompt }: AppProps) {
     	}
     	bootOrbit();
 	}, []);
+
+
+	function startAbortableTask() {
+		const controller = new AbortController();
+		currentAbortControllerRef.current = controller;
+		return controller;
+	}
+
+
+	function clearAbortableTask() {
+		currentAbortControllerRef.current = null;
+	}
+
+
+	function abortCurrentTask() {
+		if (!currentAbortControllerRef.current) {
+			return false;
+		}
+		currentAbortControllerRef.current.abort();
+		currentAbortControllerRef.current = null;
+		setIsThinking(false);
+		setIsInitting(false);
+		return true;
+	}
 
 
 	const handleProjectSelect = (item: any) => {
@@ -137,16 +163,7 @@ ${createdText}
 		const prompt = value.trim();
 
 		if (!prompt) return;
-
 		setQuery('');
-
-		setMessages((prev) => [
-			...prev,
-			{
-			role: 'user',
-			content: prompt,
-			},
-		]);
 
 		const commandHandled = await runCommand(prompt, {
 			setMessages,
@@ -157,19 +174,42 @@ ${createdText}
 			setIsInitting,
 			setReInit,
 			project,
+			isThinking,
 			constructProjectOptions,
 			setProject,
 			setCheckName,
 			setConfirmName,
+			startAbortableTask,
+  			clearAbortableTask,
+  			abortCurrentTask,
 		});
 
 		if (commandHandled) {
 			return;
 		}
 
+		if (isThinking) {
+			setMessages((prev) => [
+				...prev,
+				{
+					role: 'agent',
+					content: "There is ongoing task Orbit is handling. You can use the /abort command to terminate previous task",
+					color: "red"
+				},
+			]);
+			return;
+		}
+
+
+		setMessages((prev) => [
+			...prev,
+			{
+				role: 'user',
+				content: prompt,
+			},
+		]);
+
 		setIsThinking(true);
-
-
 		setMessages((prev) => [
 			...prev,
 			{
@@ -177,7 +217,6 @@ ${createdText}
 			content: "This is a fake response from Orbit",
 			},
 		]);
-
 		setIsThinking(false);
 };
 
@@ -419,6 +458,14 @@ Global memory updated:
 						placeholder="Your Project Name"
 					/>
 				</Box>
+			)
+		}
+
+		{
+			isThinking && (
+				<Text color="yellow">
+					<Spinner type="dots" /> Orbit's thinking...
+				</Text>
 			)
 		}
 

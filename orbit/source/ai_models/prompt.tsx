@@ -4,6 +4,7 @@ import {createOpenAIClient} from './aiClient.js';
 type AskModelOptions = {
   prompt: string;
   model?: string;
+  signal?: AbortSignal;
 };
 
 export async function askModel({

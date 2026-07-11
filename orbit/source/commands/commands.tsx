@@ -71,12 +71,24 @@ export const commands: OrbitCommand[] = [
         handler: async (_args, context) => {
             if (!context.project) {
                 context.setMessages((prev) => [
-                ...prev,
-                {
-                    role: 'system',
-                    content: 'No valid project selected. Please select or open a project first.',
-                    color: 'red',
-                },
+                    ...prev,
+                    {
+                        role: 'system',
+                        content: 'No valid project selected. Please select or open a project first.',
+                        color: 'red',
+                    },
+                ]);
+                return;
+            }
+
+            if (context.isThinking) {
+                context.setMessages((prev) => [
+                    ...prev,
+                    {
+                        role: 'agent',
+                        content: "There is ongoing task Orbit is handling. You can use the /abort command to terminate previous task",
+                        color: "red"
+                    },
                 ]);
                 return;
             }
@@ -109,6 +121,18 @@ export const commands: OrbitCommand[] = [
         description: 'Show tracked projects',
         usage: '/projects',
         handler: async (_args, context) => {
+            if (context.isThinking) {
+                context.setMessages((prev) => [
+                    ...prev,
+                    {
+                        role: 'agent',
+                        content: "There is ongoing task Orbit is handling. You can use the /abort command to terminate previous task",
+                        color: "red"
+                    },
+                ]);
+                return;
+            }
+
             try {
                 const projectsFile = readGlobalProjects();
                 const content = formatProjectsForTui(projectsFile);
@@ -158,6 +182,17 @@ export const commands: OrbitCommand[] = [
         description: "Switch Orbit to work on a different project",
         usage: '/switch',
         handler: (_args, context) => {
+            if (context.isThinking) {
+                context.setMessages((prev) => [
+                    ...prev,
+                    {
+                        role: 'agent',
+                        content: "There is ongoing task Orbit is handling. You can use the /abort command to terminate previous task",
+                        color: "red"
+                    },
+                ]);
+                return;
+            }
             context.setSelectProjectMode(true);
             const options = context.constructProjectOptions();
             context.setProjectOptions(options);
@@ -165,18 +200,28 @@ export const commands: OrbitCommand[] = [
     },
 
     {
-        name: "test-model",
+        name: "ai",
         description: "Just a mock testing to see whether the model is working in Orbit",
         usage: '/ai <prompt>',
         handler: async (_args, context) => {
+            if (context.isThinking) {
+                context.setMessages((prev) => [
+                    ...prev,
+                    {
+                        role: 'agent',
+                        content: "There is ongoing task Orbit is handling. You can use the /abort command to terminate previous task",
+                        color: "red"
+                    },
+                ]);
+                return;
+            }
             const prompt = _args.join(' ').trim();
-
             if (!prompt) {
                 context.setMessages((prev) => [
                     ...prev,
                     {
                         role: 'agent',
-                        content: 'Usage: /orbit <prompt>',
+                        content: 'Usage: /ai <prompt>',
                         color: 'yellow',
                     },
                 ]);
@@ -185,8 +230,12 @@ export const commands: OrbitCommand[] = [
 
             try {
                 context.setIsThinking(true);
+                const controller = context.startAbortableTask();
 
-                const response = await askModel({prompt});
+                const response = await askModel({
+                    prompt,
+                    signal: controller.signal,
+                });
 
                 context.setMessages((prev) => [
                     ...prev,
@@ -209,7 +258,27 @@ export const commands: OrbitCommand[] = [
                 ]);
             } finally {
                 context.setIsThinking(false);
+                context.clearAbortableTask();
             }
         }
-    }
+    },
+
+    {
+        name: "abort",
+        description: "Aborting on going tasks",
+        usage: "abort",
+        handler: (_args, context) => {
+            const didAbort = context.abortCurrentTask();
+            context.setMessages((prev) => [
+                ...prev,
+                {
+                    role: 'system',
+                    content: didAbort
+                    ? 'Aborting current task...'
+                    : 'No running task to abort.',
+                    color: didAbort ? 'yellow' : 'red',
+                },
+            ]);
+        }
+    },
 ];

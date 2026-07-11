@@ -35,8 +35,12 @@ export type CommandContext = {
     setIsInitting: React.Dispatch<React.SetStateAction<boolean>>;
     setReInit: React.Dispatch<React.SetStateAction<boolean>>;
     project: ProjectInfo | null;
+    isThinking: boolean;
     constructProjectOptions: () => ProjectOptions[];
     setProject: React.Dispatch<React.SetStateAction<ProjectInfo | null>>;
     setCheckName: React.Dispatch<React.SetStateAction<boolean>>;
     setConfirmName: React.Dispatch<React.SetStateAction<string>>;
+    startAbortableTask: () => AbortController;
+    clearAbortableTask: () => void;
+    abortCurrentTask: () => boolean;
 };
