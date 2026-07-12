@@ -43,14 +43,14 @@ export function formatProjectsForTui(projectsFile: ProjectsFile) {
 Run /init inside a project to add it to Orbit.`;
     }
     return `Tracked projects:
-    ${projects
-    .map((project, index) => {
-    return `${index + 1}. ${project.name}
-    Path: ${project.path}
-    Framework: ${project.framework ?? 'Unknown'}
-    Package manager: ${project.packageManager ?? 'Unknown'}
-    Test framework: ${project.testFramework ?? 'Unknown'}
-    Open count: ${project.openCount ?? 0}`;
+${projects
+.map((project, index) => {
+return `${index + 1}. ${project.name}
+Path: ${project.path}
+Framework: ${project.framework ?? 'Unknown'}
+Package manager: ${project.packageManager ?? 'Unknown'}
+Test framework: ${project.testFramework ?? 'Unknown'}
+Open count: ${project.openCount ?? 0}`;
     })
     .join('\n\n')}`;
 }

@@ -1,9 +1,41 @@
 {
-  "generatedAt": "2026-07-07T07:47:25.424Z",
+  "generatedAt": "2026-07-12T12:39:51.496Z",
+  "projectRoot": "/Users/marcolau/Documents/GitHub/Orbit/orbit",
+  "framework": "React",
+  "packageManager": "npm",
+  "testFramework": null,
+  "scripts": {
+    "build": "tsup source/cli.tsx --format esm --out-dir dist --clean",
+    "dev": "tsx source/cli.tsx",
+    "test": "prettier --check . && xo && ava"
+  },
   "routes": [],
-  "components": [],
+  "components": [
+    {
+      "name": "aiClient",
+      "file": "source/ai_models/aiClient.tsx",
+      "featureGuess": null
+    },
+    {
+      "name": "rumCommand",
+      "file": "source/commands/rumCommand.tsx",
+      "featureGuess": null
+    },
+    {
+      "name": "initMark",
+      "file": "source/init/initMark.tsx",
+      "featureGuess": null
+    },
+    {
+      "name": "readProjectMem",
+      "file": "source/projects/readProjectMem.tsx",
+      "featureGuess": null
+    }
+  ],
   "tests": [],
-  "scripts": {},
-  "dependencies": {},
-  "notes": []
+  "configs": [
+    "package.json",
+    "tsconfig.json"
+  ],
+  "filesScanned": 28
 }

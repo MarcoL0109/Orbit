@@ -2,6 +2,8 @@ import type { CommandContext } from "./context.js";
 import {readGlobalProjects, formatProjectsForTui} from '../projects/readProjectMem.js';
 import { getProjectDisplayName } from "../projects/search.js";
 import { askModel } from '../ai_models/prompt.js';
+import {scanProject, writeProjectMap} from '../projects/scan.js';
+import type { ProjectMap } from '../projects/scan.js';
 
 
 export function parseCommand(input: string) {
@@ -19,7 +21,6 @@ export function parseCommand(input: string) {
                 cmd.name === commandName ||
                 cmd.aliases?.includes(commandName),
         );
-
         return {
             command,
             commandName,
@@ -28,6 +29,26 @@ export function parseCommand(input: string) {
         };
     }
     return null;
+}
+
+
+function formatScanResult(projectMap: ProjectMap, projectMapPath: string) {
+    return `Project scan complete.
+
+Detected:
+- Framework: ${projectMap.framework ?? 'Unknown'}
+- Package manager: ${projectMap.packageManager ?? 'Unknown'}
+- Test framework: ${projectMap.testFramework ?? 'Unknown'}
+
+Found:
+- Routes: ${projectMap.routes.length}
+- Components: ${projectMap.components.length}
+- Tests: ${projectMap.tests.length}
+- Config files: ${projectMap.configs.length}
+- Files scanned: ${projectMap.filesScanned}
+
+Saved:
+- ${projectMapPath}`
 }
 
 
@@ -281,6 +302,54 @@ export const commands: OrbitCommand[] = [
                     color: didAbort ? 'yellow' : 'red',
                 },
             ]);
+        }
+    },
+    {
+        name: 'scan',
+        description: 'Scan the current project',
+        usage: '/scan',
+
+        handler: async (_args, context) => {
+            if (!context.project?.root) {
+                context.setMessages((prev) => [
+                ...prev,
+                {
+                    role: 'system',
+                    content: 'No project selected.',
+                    color: 'red',
+                },
+                ]);
+                return;
+            }
+
+            try {
+                context.setIsThinking(true);
+
+                const projectMap = await scanProject(context.project.root);
+                const projectMapPath = writeProjectMap(context.project.root, projectMap);
+
+                context.setMessages((prev) => [
+                ...prev,
+                {
+                    role: 'agent',
+                    content: formatScanResult(projectMap, projectMapPath),
+                    color: 'green',
+                },
+                ]);
+            } catch (error) {
+                context.setMessages((prev) => [
+                ...prev,
+                {
+                    role: 'system',
+                    content: `Project scan failed: ${
+                    error instanceof Error ? error.message : String(error)
+                    }`,
+                    color: 'red',
+                },
+                ]);
+            } finally {
+                context.setIsThinking(false);
+            }
         }
     },
 ];
