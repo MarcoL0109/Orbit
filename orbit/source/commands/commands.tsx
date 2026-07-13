@@ -32,7 +32,7 @@ export function parseCommand(input: string) {
 }
 
 
-function formatScanResult(projectMap: ProjectMap, projectMapPath: string) {
+export function formatScanResult(projectMap: ProjectMap, projectMapPath: string) {
     return `Project scan complete.
 
 Detected:
@@ -49,6 +49,21 @@ Found:
 
 Saved:
 - ${projectMapPath}`
+}
+
+
+function checkAbortable(context: any) {
+    if (context.isThinking) {
+        context.setMessages((prev) => [
+            ...prev,
+            {
+                role: 'agent',
+                content: "There is ongoing task Orbit is handling. You can use the /abort command to terminate previous task",
+                color: "red"
+            },
+        ]);
+        return;
+    }
 }
 
 
@@ -77,6 +92,7 @@ export const commands: OrbitCommand[] = [
 /help       Show available commands
 /switch     Switch Orbit to work on a different project
 /init       Initialize Orbit for this project
+/scan       Build index and context for the current project
 /projects   Show remembered projects
 /memory     Show project memory
 /clear      Clear the screen
@@ -104,17 +120,7 @@ export const commands: OrbitCommand[] = [
                 return;
             }
 
-            if (context.isThinking) {
-                context.setMessages((prev) => [
-                    ...prev,
-                    {
-                        role: 'agent',
-                        content: "There is ongoing task Orbit is handling. You can use the /abort command to terminate previous task",
-                        color: "red"
-                    },
-                ]);
-                return;
-            }
+            checkAbortable(context);
 
             if (context.project.hasOrbitFolder) {
                 context.setMessages((prev) => [
@@ -133,7 +139,6 @@ export const commands: OrbitCommand[] = [
             if (context.project.root) {
                 projectName = getProjectDisplayName(context.project.root);
             }
-
             context.setConfirmName(projectName);
             context.setCheckName(true);
         }
@@ -144,18 +149,7 @@ export const commands: OrbitCommand[] = [
         description: 'Show tracked projects',
         usage: '/projects',
         handler: async (_args, context) => {
-            if (context.isThinking) {
-                context.setMessages((prev) => [
-                    ...prev,
-                    {
-                        role: 'agent',
-                        content: "There is ongoing task Orbit is handling. You can use the /abort command to terminate previous task",
-                        color: "red"
-                    },
-                ]);
-                return;
-            }
-
+            checkAbortable(context);
             try {
                 const projectsFile = readGlobalProjects();
                 const content = formatProjectsForTui(projectsFile);
@@ -205,17 +199,7 @@ export const commands: OrbitCommand[] = [
         description: "Switch Orbit to work on a different project",
         usage: '/switch',
         handler: (_args, context) => {
-            if (context.isThinking) {
-                context.setMessages((prev) => [
-                    ...prev,
-                    {
-                        role: 'agent',
-                        content: "There is ongoing task Orbit is handling. You can use the /abort command to terminate previous task",
-                        color: "red"
-                    },
-                ]);
-                return;
-            }
+            checkAbortable(context);
             context.setSelectProjectMode(true);
             const options = context.constructProjectOptions();
             context.setProjectOptions(options);
@@ -223,21 +207,12 @@ export const commands: OrbitCommand[] = [
     },
 
     {
+        // This is a beta command. This should be removed at the end
         name: "ai",
         description: "Just a mock testing to see whether the model is working in Orbit",
         usage: '/ai <prompt>',
         handler: async (_args, context) => {
-            if (context.isThinking) {
-                context.setMessages((prev) => [
-                    ...prev,
-                    {
-                        role: 'agent',
-                        content: "There is ongoing task Orbit is handling. You can use the /abort command to terminate previous task",
-                        color: "red"
-                    },
-                ]);
-                return;
-            }
+            checkAbortable(context);
             const prompt = _args.join(' ').trim();
             if (!prompt) {
                 context.setMessages((prev) => [
@@ -310,6 +285,7 @@ export const commands: OrbitCommand[] = [
         usage: '/scan',
 
         handler: async (_args, context) => {
+            checkAbortable(context);
             if (!context.project?.root) {
                 context.setMessages((prev) => [
                 ...prev,
@@ -321,7 +297,6 @@ export const commands: OrbitCommand[] = [
                 ]);
                 return;
             }
-
             try {
                 context.setIsThinking(true);
 

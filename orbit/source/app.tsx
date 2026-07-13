@@ -11,7 +11,10 @@ import type { InitFileAction } from './init/init.js';
 import type { Message, ProjectOptions, ProjectInfo } from './commands/context.js'
 import { runCommand } from './commands/rumCommand.js';
 import { getBestCommandCompletion, getGhostCompletion } from './commands/autocomplete.js';
+import { formatScanResult } from "./commands/commands.js";
 import { readGlobalProjects } from './projects/readProjectMem.js';
+import { scanProject, writeProjectMap } from './projects/scan.js';
+
 
 
 type AppProps = {
@@ -262,7 +265,7 @@ ${createdText}
 	}
 
 
-	const handleConfirmNameInit = () => {
+	const handleConfirmNameInit = async () => {
 		if (project) {
 			try {
 				const result = initOrbitProject({
@@ -287,7 +290,6 @@ ${createdText}
 					{
 						role: 'agent',
 						content: `${formatInitResult(result.files)}
-			
 Global memory updated:
 ✓ ~/.orbit/projects.json`,
 						color: 'green',
@@ -302,6 +304,21 @@ Global memory updated:
 						}
 						: prev,
 				);
+				// Fused the scan project in the init as well.
+				if (project.root) {
+					const projectMap = await scanProject(project.root);
+					const projectMapPath = writeProjectMap(project.root, projectMap);
+
+					setMessages((prev) => [
+						...prev,
+						{
+							role: 'agent',
+							content: formatScanResult(projectMap, projectMapPath),
+							color: 'green',
+						},
+					]);
+				}
+				
 			}
 			catch (error) {
 				setMessages((prev) => [
