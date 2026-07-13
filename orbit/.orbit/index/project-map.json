@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-12T12:39:51.496Z",
+  "generatedAt": "2026-07-13T07:04:05.218Z",
   "projectRoot": "/Users/marcolau/Documents/GitHub/Orbit/orbit",
   "framework": "React",
   "packageManager": "npm",
@@ -9,33 +9,572 @@
     "dev": "tsx source/cli.tsx",
     "test": "prettier --check . && xo && ava"
   },
+  "files": [
+    {
+      "file": "package.json",
+      "role": "config",
+      "extension": ".json",
+      "featureGuess": null,
+      "reasons": [
+        "config-like filename"
+      ],
+      "imports": [],
+      "exports": [],
+      "textSignals": []
+    },
+    {
+      "file": "readme.md",
+      "role": "markdown",
+      "extension": ".md",
+      "featureGuess": null,
+      "reasons": [
+        "markdown file"
+      ],
+      "imports": [],
+      "exports": [],
+      "textSignals": []
+    },
+    {
+      "file": "source/ai_models/aiClient.tsx",
+      "role": "ai",
+      "extension": ".tsx",
+      "featureGuess": "ai",
+      "reasons": [
+        "ai folder or OpenAI import"
+      ],
+      "imports": [
+        "openai"
+      ],
+      "exports": [
+        "createOpenAIClient"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/ai_models/prompt.tsx",
+      "role": "component",
+      "extension": ".tsx",
+      "featureGuess": "ai",
+      "reasons": [
+        "tsx/jsx source file"
+      ],
+      "imports": [
+        "./aiClient.js"
+      ],
+      "exports": [
+        "askModel"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/app.tsx",
+      "role": "entry",
+      "extension": ".tsx",
+      "featureGuess": "init",
+      "reasons": [
+        "entry-like filename"
+      ],
+      "imports": [
+        "react",
+        "ink",
+        "ink-text-input",
+        "ink-spinner",
+        "./projects/search.js",
+        "./projects/path.js",
+        "ink-select-input",
+        "./init/initMark.js",
+        "./init/init.js",
+        "./init/init.js",
+        "./commands/context.js",
+        "./commands/rumCommand.js",
+        "./commands/autocomplete.js",
+        "./projects/readProjectMem.js"
+      ],
+      "exports": [
+        "App"
+      ],
+      "textSignals": [
+        "([]);\n\tconst [query, setQuery] = useState",
+        "(\"\");\n\tconst [isBooting, setIsBooting] = useState",
+        "(true);\n\tconst [isThinking, setIsThinking] = useState",
+        "(false);\n\tconst [isInitting, setIsInitting] = useState",
+        "(false);\n\tconst [reInit, setReInit] = useState",
+        "(false);\n\tconst [project, setProject] = useState",
+        "(null);\n\tconst [selectProjectMode, setSelectProjectMode] = useState",
+        "(false);\n\tconst [projectOptions, setProjectOptions] = useState",
+        "([]);\n\tconst [selectedProjectOption, setSelectedProjectOption] = useState",
+        "(\"\");\n\tconst [inputPath, setInputPath] = useState",
+        "(\"\");\n\tconst [checkName, setCheckName] = useState",
+        "(false);\n\tconst [confirmName, setConfirmName] = useState",
+        "(\"\");\n\tconst currentAbortControllerRef = useRef",
+        "🪐 Orbit",
+        "Interactive Mode",
+        "AI QA agent for E2E testing",
+        "Detecting project context...",
+        "Project Path:",
+        "Confidence:",
+        "No project detected"
+      ]
+    },
+    {
+      "file": "source/cli.tsx",
+      "role": "entry",
+      "extension": ".tsx",
+      "featureGuess": null,
+      "reasons": [
+        "entry-like filename"
+      ],
+      "imports": [
+        "react",
+        "ink",
+        "commander",
+        "./app.js"
+      ],
+      "exports": [],
+      "textSignals": []
+    },
+    {
+      "file": "source/commands/autocomplete.tsx",
+      "role": "command",
+      "extension": ".tsx",
+      "featureGuess": "commands",
+      "reasons": [
+        "inside commands folder"
+      ],
+      "imports": [
+        "./commands.js"
+      ],
+      "exports": [
+        "getCommandSuggestions",
+        "getBestCommandCompletion",
+        "getGhostCompletion"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/commands/commands.tsx",
+      "role": "command",
+      "extension": ".tsx",
+      "featureGuess": "init",
+      "reasons": [
+        "contains command metadata"
+      ],
+      "imports": [
+        "./context.js",
+        "../projects/readProjectMem.js",
+        "../projects/search.js",
+        "../ai_models/prompt.js",
+        "../projects/scan.js",
+        "../projects/scan.js"
+      ],
+      "exports": [
+        "parseCommand",
+        "OrbitCommand",
+        "commands"
+      ],
+      "textSignals": [
+        "command:help",
+        "command:init",
+        "command:projects",
+        "command:exit",
+        "command:clear",
+        "command:switch",
+        "command:ai",
+        "command:abort",
+        "command:scan",
+        "usage:/help",
+        "usage:/init",
+        "usage:/projects",
+        "usage:/exit",
+        "usage:/clear",
+        "usage:/switch",
+        "usage:/ai <prompt>",
+        "usage:abort",
+        "usage:/scan",
+        "Promise"
+      ]
+    },
+    {
+      "file": "source/commands/context.tsx",
+      "role": "command",
+      "extension": ".tsx",
+      "featureGuess": "init",
+      "reasons": [
+        "inside commands folder"
+      ],
+      "imports": [
+        "react"
+      ],
+      "exports": [
+        "Message",
+        "ProjectOptions",
+        "ProjectInfo",
+        "CommandContext"
+      ],
+      "textSignals": [
+        ";\n    setQuery: React.Dispatch",
+        ";\n    setIsThinking: React.Dispatch",
+        ";\n    setSelectProjectMode: React.Dispatch",
+        ";\n    setProjectOptions: React.Dispatch",
+        ";\n    setIsInitting: React.Dispatch",
+        ";\n    setReInit: React.Dispatch",
+        "ProjectOptions[];\n    setProject: React.Dispatch",
+        ";\n    setCheckName: React.Dispatch",
+        ";\n    setConfirmName: React.Dispatch"
+      ]
+    },
+    {
+      "file": "source/commands/rumCommand.tsx",
+      "role": "command",
+      "extension": ".tsx",
+      "featureGuess": "commands",
+      "reasons": [
+        "inside commands folder"
+      ],
+      "imports": [
+        "./commands.js",
+        "./context.js"
+      ],
+      "exports": [
+        "runCommand"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/init/init.tsx",
+      "role": "component",
+      "extension": ".tsx",
+      "featureGuess": "init",
+      "reasons": [
+        "tsx/jsx source file"
+      ],
+      "imports": [
+        "node:fs",
+        "node:path"
+      ],
+      "exports": [
+        "InitFileAction",
+        "initOrbitProject"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/init/initMark.tsx",
+      "role": "component",
+      "extension": ".tsx",
+      "featureGuess": "init",
+      "reasons": [
+        "tsx/jsx source file"
+      ],
+      "imports": [
+        "node:fs",
+        "node:os",
+        "node:path"
+      ],
+      "exports": [
+        "KnownProject",
+        "getOrbitHomeDir",
+        "getProjectsJsonPath",
+        "ensureProjectsJson",
+        "readProjectsJson",
+        "writeProjectsJson",
+        "rememberProject"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/projects/path.tsx",
+      "role": "component",
+      "extension": ".tsx",
+      "featureGuess": "projects",
+      "reasons": [
+        "tsx/jsx source file"
+      ],
+      "imports": [
+        "node:fs",
+        "node:os",
+        "node:path"
+      ],
+      "exports": [
+        "resolveUserPath",
+        "validateProjectPath"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/projects/readProjectMem.tsx",
+      "role": "component",
+      "extension": ".tsx",
+      "featureGuess": "projects",
+      "reasons": [
+        "tsx/jsx source file"
+      ],
+      "imports": [
+        "node:fs",
+        "node:os",
+        "node:path"
+      ],
+      "exports": [
+        "getGlobalProjectsPath",
+        "readGlobalProjects",
+        "formatProjectsForTui"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/projects/scan.tsx",
+      "role": "component",
+      "extension": ".tsx",
+      "featureGuess": "scan",
+      "reasons": [
+        "tsx/jsx source file"
+      ],
+      "imports": [
+        "node:fs",
+        "node:path"
+      ],
+      "exports": [
+        "ProjectMap",
+        "SourceFileRole",
+        "ScannedFile",
+        "ProjectRoute",
+        "ProjectComponent",
+        "ProjectTest",
+        "scanProject"
+      ],
+      "textSignals": [
+        ";\n  dependencies?: Record",
+        ";\n  devDependencies?: Record",
+        "([^"
+      ]
+    },
+    {
+      "file": "source/projects/search.tsx",
+      "role": "component",
+      "extension": ".tsx",
+      "featureGuess": "projects",
+      "reasons": [
+        "tsx/jsx source file"
+      ],
+      "imports": [
+        "node:fs",
+        "node:path",
+        "node:os"
+      ],
+      "exports": [
+        "detectProjectRoot",
+        "getProjectDisplayName"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "test.tsx",
+      "role": "component",
+      "extension": ".tsx",
+      "featureGuess": null,
+      "reasons": [
+        "tsx/jsx source file"
+      ],
+      "imports": [
+        "react",
+        "chalk",
+        "ava",
+        "ink-testing-library",
+        "./source/app.js"
+      ],
+      "exports": [],
+      "textSignals": []
+    },
+    {
+      "file": "tsconfig.json",
+      "role": "config",
+      "extension": ".json",
+      "featureGuess": "config",
+      "reasons": [
+        "config-like filename"
+      ],
+      "imports": [],
+      "exports": [],
+      "textSignals": []
+    }
+  ],
   "routes": [],
   "components": [
     {
-      "name": "aiClient",
-      "file": "source/ai_models/aiClient.tsx",
-      "featureGuess": null
+      "name": "prompt",
+      "file": "source/ai_models/prompt.tsx",
+      "featureGuess": "ai"
     },
     {
-      "name": "rumCommand",
-      "file": "source/commands/rumCommand.tsx",
-      "featureGuess": null
+      "name": "init",
+      "file": "source/init/init.tsx",
+      "featureGuess": "init"
     },
     {
       "name": "initMark",
       "file": "source/init/initMark.tsx",
-      "featureGuess": null
+      "featureGuess": "init"
+    },
+    {
+      "name": "path",
+      "file": "source/projects/path.tsx",
+      "featureGuess": "projects"
     },
     {
       "name": "readProjectMem",
       "file": "source/projects/readProjectMem.tsx",
+      "featureGuess": "projects"
+    },
+    {
+      "name": "scan",
+      "file": "source/projects/scan.tsx",
+      "featureGuess": "scan"
+    },
+    {
+      "name": "search",
+      "file": "source/projects/search.tsx",
+      "featureGuess": "projects"
+    },
+    {
+      "name": "test",
+      "file": "test.tsx",
       "featureGuess": null
     }
   ],
   "tests": [],
+  "commands": [
+    {
+      "file": "source/commands/autocomplete.tsx",
+      "role": "command",
+      "extension": ".tsx",
+      "featureGuess": "commands",
+      "reasons": [
+        "inside commands folder"
+      ],
+      "imports": [
+        "./commands.js"
+      ],
+      "exports": [
+        "getCommandSuggestions",
+        "getBestCommandCompletion",
+        "getGhostCompletion"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/commands/commands.tsx",
+      "role": "command",
+      "extension": ".tsx",
+      "featureGuess": "init",
+      "reasons": [
+        "contains command metadata"
+      ],
+      "imports": [
+        "./context.js",
+        "../projects/readProjectMem.js",
+        "../projects/search.js",
+        "../ai_models/prompt.js",
+        "../projects/scan.js",
+        "../projects/scan.js"
+      ],
+      "exports": [
+        "parseCommand",
+        "OrbitCommand",
+        "commands"
+      ],
+      "textSignals": [
+        "command:help",
+        "command:init",
+        "command:projects",
+        "command:exit",
+        "command:clear",
+        "command:switch",
+        "command:ai",
+        "command:abort",
+        "command:scan",
+        "usage:/help",
+        "usage:/init",
+        "usage:/projects",
+        "usage:/exit",
+        "usage:/clear",
+        "usage:/switch",
+        "usage:/ai <prompt>",
+        "usage:abort",
+        "usage:/scan",
+        "Promise"
+      ]
+    },
+    {
+      "file": "source/commands/context.tsx",
+      "role": "command",
+      "extension": ".tsx",
+      "featureGuess": "init",
+      "reasons": [
+        "inside commands folder"
+      ],
+      "imports": [
+        "react"
+      ],
+      "exports": [
+        "Message",
+        "ProjectOptions",
+        "ProjectInfo",
+        "CommandContext"
+      ],
+      "textSignals": [
+        ";\n    setQuery: React.Dispatch",
+        ";\n    setIsThinking: React.Dispatch",
+        ";\n    setSelectProjectMode: React.Dispatch",
+        ";\n    setProjectOptions: React.Dispatch",
+        ";\n    setIsInitting: React.Dispatch",
+        ";\n    setReInit: React.Dispatch",
+        "ProjectOptions[];\n    setProject: React.Dispatch",
+        ";\n    setCheckName: React.Dispatch",
+        ";\n    setConfirmName: React.Dispatch"
+      ]
+    },
+    {
+      "file": "source/commands/rumCommand.tsx",
+      "role": "command",
+      "extension": ".tsx",
+      "featureGuess": "commands",
+      "reasons": [
+        "inside commands folder"
+      ],
+      "imports": [
+        "./commands.js",
+        "./context.js"
+      ],
+      "exports": [
+        "runCommand"
+      ],
+      "textSignals": []
+    }
+  ],
+  "aiFiles": [
+    {
+      "file": "source/ai_models/aiClient.tsx",
+      "role": "ai",
+      "extension": ".tsx",
+      "featureGuess": "ai",
+      "reasons": [
+        "ai folder or OpenAI import"
+      ],
+      "imports": [
+        "openai"
+      ],
+      "exports": [
+        "createOpenAIClient"
+      ],
+      "textSignals": []
+    }
+  ],
+  "projectLogicFiles": [],
+  "typeFiles": [],
+  "utilityFiles": [],
   "configs": [
     "package.json",
     "tsconfig.json"
   ],
-  "filesScanned": 28
+  "filesScanned": 18
 }
