@@ -1,9 +1,9 @@
 {
-  "name": "Default",
+  "name": "orbit",
   "root": "/Users/marcolau/Documents/GitHub/Orbit/orbit",
   "framework": null,
   "packageManager": "npm",
   "testFramework": null,
-  "createdAt": "2026-07-07T07:47:25.424Z",
-  "updatedAt": "2026-07-07T07:47:25.424Z"
+  "createdAt": "2026-07-14T08:05:43.815Z",
+  "updatedAt": "2026-07-14T08:05:43.815Z"
 }

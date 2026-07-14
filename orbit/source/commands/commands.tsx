@@ -327,4 +327,15 @@ export const commands: OrbitCommand[] = [
             }
         }
     },
+    // This command will remove .orbit folder and its record in the global memory in projects.json
+    // Rmb to make a user confirmation prompt
+    {
+        name: 'deinit',
+        description: 'This command delete .orbit context for a particular project',
+        usage: '/deinit',
+        handler: (_args, context) => {
+
+        }
+
+    }
 ];
