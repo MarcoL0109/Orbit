@@ -14,6 +14,7 @@ import { getBestCommandCompletion, getGhostCompletion } from './commands/autocom
 import { formatScanResult } from "./commands/commands.js";
 import { readGlobalProjects } from './projects/readProjectMem.js';
 import { scanProject, writeProjectMap } from './projects/scan.js';
+import { deinitContext } from './init/deinit.js';
 
 
 
@@ -35,9 +36,12 @@ export function App({ initialPrompt }: AppProps) {
 	const [selectedProjectOption, setSelectedProjectOption] = useState<string>("");
 	const [inputPath, setInputPath] = useState<string>("");
 	const [checkName, setCheckName] = useState<boolean>(false);
+	const [confirmDeinit, setConfirmDeinit] = useState<boolean>(false);
 	const [confirmName, setConfirmName] = useState<string>("");
 	const currentAbortControllerRef = useRef<AbortController | null>(null);
 	const ghostCompletetion = getGhostCompletion(query);
+	const [deinitTarget, setDeinitTarget] = useState<string>("");
+	const confirmationOptions = [{label: "Confirm", value: "confirm"}, {label: "Cancel", value: "cancel"}]
 
 
 	useInput((_input, key) => {
@@ -130,34 +134,38 @@ export function App({ initialPrompt }: AppProps) {
 			label: '-> Add New Project',
 			value: 'add',
 		});
-
 		if (project) {
 			options.push({
 				label: '-> Exit Menu',
 				value: 'quit',
 			});
 		}
-
 		options.push({
 			label: '-> Quit Orbit',
 			value: 'exit',
 		});
-
 		return options;
 	};
 
 
 	function formatInitResult(files: InitFileAction[]) {
 		const created = files.filter((file) => file.action === 'created');
+		const skipped = files.filter((file) => file.action === 'skipped');
 		const createdText =
 		created.length > 0
 			? created.map((file) => `✓ ${file.relativePath}`).join('\n')
 			: 'None';
+		const skippedText =
+		skipped.length > 0
+		? skipped.map((file) => `✗ ${file.relativePath}`).join('\n')
+		: 'None';
 	
 		return `Orbit initialized this project.
 	
 Created:
 ${createdText}
+Skipped:
+${skippedText}
 `;
 	}
 
@@ -185,6 +193,8 @@ ${createdText}
 			startAbortableTask,
   			clearAbortableTask,
   			abortCurrentTask,
+			setConfirmDeinit,
+			setDeinitTarget,
 		});
 
 		if (commandHandled) {
@@ -340,6 +350,17 @@ Global memory updated:
 	}
 
 
+	const handleConfirmDeinit = (item: any) => {
+		if (item.value === 'confirm') {
+			if (project) {
+				const projectPath = deinitContext(deinitTarget, project);
+			}
+			
+		}
+		setConfirmDeinit(false);
+	}
+
+
   return (
     <Box flexDirection="column">
       <Box borderStyle="round" paddingX={1} flexDirection="column">
@@ -482,6 +503,18 @@ Global memory updated:
 				<Text color="yellow">
 					<Spinner type="dots" /> Orbit's thinking...
 				</Text>
+			)
+		}
+
+		{
+			confirmDeinit && (
+				<Box flexDirection="column">
+					<Text color="red">Are you sure to deinit orbit context for this project. All context will be deleted after this</Text>
+					<SelectInput
+						items={confirmationOptions}
+						onSelect={handleConfirmDeinit}
+					/>
+				</Box>
 			)
 		}
 

@@ -277,22 +277,6 @@ This reads:
 ~/.orbit/projects.json
 ```
 
-### `/ai`
-
-Send a prompt to the configured AI model.
-
-```txt
-/ai give me 5 Playwright E2E test ideas for a login page
-```
-
-This command requires:
-
-```txt
-OPENAI_API_KEY
-```
-
-to be available in the environment.
-
 ### `/abort`
 
 Abort the current running task.
