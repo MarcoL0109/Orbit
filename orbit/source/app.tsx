@@ -14,7 +14,7 @@ import { getBestCommandCompletion, getGhostCompletion } from './commands/autocom
 import { formatScanResult } from "./commands/commands.js";
 import { readGlobalProjects } from './projects/readProjectMem.js';
 import { scanProject, writeProjectMap } from './projects/scan.js';
-import { deinitContext } from './init/deinit.js';
+import { deinitContext, getProjectPath } from './init/deinit.js';
 
 
 
@@ -332,14 +332,14 @@ Global memory updated:
 			}
 			catch (error) {
 				setMessages((prev) => [
-				...prev,
-				{
-					role: 'system',
-					content: `Failed to initialize Orbit context: ${
-						error instanceof Error ? error.message : String(error)
-					}`,
-					color: 'red',
-				},
+					...prev,
+					{
+						role: 'system',
+						content: `Failed to initialize Orbit context: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+						color: 'red',
+					},
 				]);
 			} finally {
 				setIsInitting(false);
@@ -353,7 +353,28 @@ Global memory updated:
 	const handleConfirmDeinit = (item: any) => {
 		if (item.value === 'confirm') {
 			if (project) {
-				const projectPath = deinitContext(deinitTarget, project);
+				const projectPath = getProjectPath(deinitTarget, project);
+				if (!projectPath.ok) {
+					setMessages((prev) => [
+						...prev,
+						{
+							role: 'system',
+							content: `${projectPath.context}`,
+							color: 'red',
+						},
+					]);
+				} else {
+					const path = projectPath.route;
+					deinitContext(path);
+					setMessages((prev) => [
+						...prev,
+						{
+							role: 'system',
+							content: `Orbit Context Deleted Successfully`,
+							color: 'green',
+						},
+					]);
+				}
 			}
 			
 		}

@@ -10,10 +10,8 @@ export type DeinitResponse = {
     context: string;
 };
 
-export function deinitContext(name: string, project: ProjectInfo | null): DeinitResponse {
-
+export function getProjectPath(name: string, project: ProjectInfo | null): DeinitResponse {
     const trimmedName = name.trim();
-
     if (trimmedName !== '') {
         const projectsPath = getProjectsJsonPath();
 
@@ -72,4 +70,8 @@ export function deinitContext(name: string, project: ProjectInfo | null): Deinit
         route: project.root,
         context: 'Using current selected project.',
     };
+}
+
+export function deinitContext(path: string) {
+    fs.rmSync(`${path}/.orbit`, { recursive: true, force: true });
 }
