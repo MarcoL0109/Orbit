@@ -4,7 +4,7 @@ import { getProjectDisplayName } from "../projects/search.js";
 import { askModel } from '../ai_models/prompt.js';
 import {scanProject, writeProjectMap} from '../projects/scan.js';
 import type { ProjectMap } from '../projects/scan.js';
-import { deinitContext } from "../init/deinit.js";
+
 
 
 export function parseCommand(input: string) {
@@ -89,10 +89,11 @@ export const commands: OrbitCommand[] = [
                 {
                     role: 'system',
                     content: `
-                    Available Orbit commands:
+Available Orbit commands:
 /help       Show available commands
 /switch     Switch Orbit to work on a different project
 /init       Initialize Orbit for this project
+/deinit     Delete the .orbit folder within the current project
 /scan       Build index and context for the current project
 /projects   Show remembered projects
 /memory     Show project memory
@@ -332,14 +333,9 @@ export const commands: OrbitCommand[] = [
     {
         name: 'deinit',
         description: 'This command delete .orbit context for a particular project',
-        usage: '/deinit <project>',
+        usage: '/deinit',
         handler: (_args, context) => {
-            const projectName = _args.join(' ').trim();
-            if (projectName) {
-                context.setDeinitTarget(projectName);
-            }
             context.setConfirmDeinit(true);
         }
-
     }
 ];

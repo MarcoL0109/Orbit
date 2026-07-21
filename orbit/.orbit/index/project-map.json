@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-14T08:05:43.837Z",
+  "generatedAt": "2026-07-21T07:48:09.637Z",
   "projectRoot": "/Users/marcolau/Documents/GitHub/Orbit/orbit",
   "framework": "React",
   "packageManager": "npm",
@@ -90,7 +90,8 @@
         "./commands/autocomplete.js",
         "./commands/commands.js",
         "./projects/readProjectMem.js",
-        "./projects/scan.js"
+        "./projects/scan.js",
+        "./init/deinit.js"
       ],
       "exports": [
         "App"
@@ -107,6 +108,7 @@
         "([]);\n\tconst [selectedProjectOption, setSelectedProjectOption] = useState",
         "(\"\");\n\tconst [inputPath, setInputPath] = useState",
         "(\"\");\n\tconst [checkName, setCheckName] = useState",
+        "(false);\n\tconst [confirmDeinit, setConfirmDeinit] = useState",
         "(false);\n\tconst [confirmName, setConfirmName] = useState",
         "(\"\");\n\tconst currentAbortControllerRef = useRef",
         "🪐 Orbit",
@@ -114,8 +116,7 @@
         "AI QA agent for E2E testing",
         "Detecting project context...",
         "Project Path:",
-        "Confidence:",
-        "No project detected"
+        "Confidence:"
       ]
     },
     {
@@ -185,6 +186,7 @@
         "command:ai",
         "command:abort",
         "command:scan",
+        "command:deinit",
         "usage:/help",
         "usage:/init",
         "usage:/projects",
@@ -194,6 +196,7 @@
         "usage:/ai <prompt>",
         "usage:abort",
         "usage:/scan",
+        "usage:/deinit",
         "Promise"
       ]
     },
@@ -223,7 +226,8 @@
         ";\n    setReInit: React.Dispatch",
         "ProjectOptions[];\n    setProject: React.Dispatch",
         ";\n    setCheckName: React.Dispatch",
-        ";\n    setConfirmName: React.Dispatch"
+        ";\n    setConfirmName: React.Dispatch",
+        "boolean;\n    setConfirmDeinit: React.Dispatch"
       ]
     },
     {
@@ -240,6 +244,25 @@
       ],
       "exports": [
         "runCommand"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/init/deinit.tsx",
+      "role": "component",
+      "extension": ".tsx",
+      "featureGuess": "init",
+      "reasons": [
+        "tsx/jsx source file"
+      ],
+      "imports": [
+        "node:fs",
+        "../commands/context.js"
+      ],
+      "exports": [
+        "DeinitResponse",
+        "getProjectPath",
+        "deinitContext"
       ],
       "textSignals": []
     },
@@ -409,6 +432,11 @@
       "featureGuess": "ai"
     },
     {
+      "name": "deinit",
+      "file": "source/init/deinit.tsx",
+      "featureGuess": "init"
+    },
+    {
       "name": "init",
       "file": "source/init/init.tsx",
       "featureGuess": "init"
@@ -496,6 +524,7 @@
         "command:ai",
         "command:abort",
         "command:scan",
+        "command:deinit",
         "usage:/help",
         "usage:/init",
         "usage:/projects",
@@ -505,6 +534,7 @@
         "usage:/ai <prompt>",
         "usage:abort",
         "usage:/scan",
+        "usage:/deinit",
         "Promise"
       ]
     },
@@ -534,7 +564,8 @@
         ";\n    setReInit: React.Dispatch",
         "ProjectOptions[];\n    setProject: React.Dispatch",
         ";\n    setCheckName: React.Dispatch",
-        ";\n    setConfirmName: React.Dispatch"
+        ";\n    setConfirmName: React.Dispatch",
+        "boolean;\n    setConfirmDeinit: React.Dispatch"
       ]
     },
     {
@@ -580,5 +611,5 @@
     "package.json",
     "tsconfig.json"
   ],
-  "filesScanned": 18
+  "filesScanned": 19
 }

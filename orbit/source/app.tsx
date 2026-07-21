@@ -40,7 +40,6 @@ export function App({ initialPrompt }: AppProps) {
 	const [confirmName, setConfirmName] = useState<string>("");
 	const currentAbortControllerRef = useRef<AbortController | null>(null);
 	const ghostCompletetion = getGhostCompletion(query);
-	const [deinitTarget, setDeinitTarget] = useState<string>("");
 	const confirmationOptions = [{label: "Confirm", value: "confirm"}, {label: "Cancel", value: "cancel"}]
 
 
@@ -194,7 +193,6 @@ ${skippedText}
   			clearAbortableTask,
   			abortCurrentTask,
 			setConfirmDeinit,
-			setDeinitTarget,
 		});
 
 		if (commandHandled) {
@@ -352,8 +350,9 @@ Global memory updated:
 
 	const handleConfirmDeinit = (item: any) => {
 		if (item.value === 'confirm') {
+			setIsThinking(true);
 			if (project) {
-				const projectPath = getProjectPath(deinitTarget, project);
+				const projectPath = getProjectPath(project);
 				if (!projectPath.ok) {
 					setMessages((prev) => [
 						...prev,
@@ -366,18 +365,21 @@ Global memory updated:
 				} else {
 					const path = projectPath.route;
 					deinitContext(path);
+					if (project) {
+						project.hasOrbitFolder = false;
+					}
 					setMessages((prev) => [
 						...prev,
 						{
 							role: 'system',
-							content: `Orbit Context Deleted Successfully`,
+							content: `Orbit context of ${path} deleted successfully`,
 							color: 'green',
 						},
 					]);
 				}
 			}
-			
 		}
+		setIsThinking(false);
 		setConfirmDeinit(false);
 	}
 
@@ -390,7 +392,7 @@ Global memory updated:
 			<Text color="cyan">Interactive Mode</Text>
 		</Box>
 
-		<Text dimColor>AI QA agent for E2E testing</Text>
+		<Text>AI QA agent for E2E testing</Text>
 
 		<Box marginTop={1} flexDirection="column">
 			{isBooting && (
@@ -402,7 +404,7 @@ Global memory updated:
 			{!isBooting && project?.isProject && (
 			<>
 				<Text>
-					Project Path: <Text dimColor>{project.root}</Text>
+					Project Path: <Text>{project.root}</Text>
 				</Text>
 				<Text>
 					Confidence: <Text color="green">{project.confidence}%</Text>
@@ -422,7 +424,7 @@ Global memory updated:
 				<Text>
 					Orbit Context:{' '}
 					<Text color={project.hasOrbitFolder ? 'green' : 'red'}>
-						{project.hasOrbitFolder ? '.orbit found' : 'not initialized'}
+						{project.hasOrbitFolder ? 'Initialized' : 'Not Initialized'}
 					</Text>
 				</Text>
 			</>
@@ -453,7 +455,7 @@ Global memory updated:
 			))}
 		</Box>
 
-		{isBooting || selectProjectMode || reInit ? (
+		{isBooting || selectProjectMode || reInit || confirmDeinit ? (
 			<Box marginTop={1}>
 				<Text color="yellow">
 					<Spinner type="dots" /> Selection Menu In Progress...
