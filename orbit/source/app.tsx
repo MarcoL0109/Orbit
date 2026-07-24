@@ -9,12 +9,12 @@ import { rememberProject } from "./init/initMark.js";
 import { initOrbitProject } from "./init/init.js";
 import type { InitFileAction } from './init/init.js';
 import type { Message, ProjectOptions, ProjectInfo } from './commands/context.js'
-import { runCommand } from './commands/rumCommand.js';
+import { runCommand } from './commands/runCommand.js';
 import { getBestCommandCompletion, getGhostCompletion } from './commands/autocomplete.js';
 import { formatScanResult } from "./commands/commands.js";
 import { readGlobalProjects } from './projects/readProjectMem.js';
 import { scanProject, writeProjectMap } from './projects/scan.js';
-import { deinitContext, getProjectPath } from './init/deinit.js';
+import { deinitLocalContext, getProjectPath, deinitGlobalContext } from './init/deinit.js';
 
 
 
@@ -353,29 +353,31 @@ Global memory updated:
 			setIsThinking(true);
 			if (project) {
 				const projectPath = getProjectPath(project);
-				if (!projectPath.ok) {
-					setMessages((prev) => [
-						...prev,
-						{
-							role: 'system',
-							content: `${projectPath.context}`,
-							color: 'red',
-						},
-					]);
-				} else {
-					const path = projectPath.route;
-					deinitContext(path);
-					if (project) {
-						project.hasOrbitFolder = false;
+				const path = projectPath.route;
+				deinitLocalContext(path);
+				if (project) {
+					project.hasOrbitFolder = false;
+				}
+				setMessages((prev) => [
+					...prev,
+					{
+						role: 'system',
+						content: `Orbit context of ${path} deleted successfully`,
+						color: 'green',
+					},
+				]);
+				if (project.root) {
+					const deinitGlobalRepsonse = deinitGlobalContext(project.root);
+					if (deinitGlobalRepsonse.ok) {
+						setMessages((prev) => [
+							...prev,
+							{
+								role: 'system',
+								content: `Removed project from global orbit memory`,
+								color: 'green',
+							},
+						]);
 					}
-					setMessages((prev) => [
-						...prev,
-						{
-							role: 'system',
-							content: `Orbit context of ${path} deleted successfully`,
-							color: 'green',
-						},
-					]);
 				}
 			}
 		}

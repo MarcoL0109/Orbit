@@ -24,7 +24,8 @@ export async function runCommand(input: string, context: CommandContext) {
       ...prev,
       {
         role: 'system',
-        content: `Unknown command: /${commandName}
+        content: `
+Unknown command: /${commandName}
 Type /help to see available commands.`,
       },
     ]);

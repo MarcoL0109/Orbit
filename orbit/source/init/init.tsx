@@ -99,7 +99,8 @@ Orbit was initialized for this project on ${now}.
     writeTextIfMissing(
       projectRoot,
       path.join(memoryDir, 'decisions.md'),
-      `# Decisions
+      `
+# Decisions
 
 ## Testing Strategy
 
@@ -113,7 +114,8 @@ Orbit was initialized for this project on ${now}.
     writeTextIfMissing(
       projectRoot,
       path.join(memoryDir, 'failures.md'),
-      `# Failure Memory
+      `
+# Failure Memory
 
 Orbit will record useful test failure patterns here.
 

@@ -1,16 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { KnownProject } from '../init/initMark.js';
 
-type KnownProject = {
-  name: string;
-  path: string;
-  framework?: string;
-  packageManager?: string;
-  testFramework?: string;
-  lastOpenedAt?: string;
-  openCount?: number;
-};
 
 type ProjectsFile = {
   projects: KnownProject[];
@@ -42,7 +34,8 @@ export function formatProjectsForTui(projectsFile: ProjectsFile) {
         return `No projects remembered yet.
 Run /init inside a project to add it to Orbit.`;
     }
-    return `Tracked projects:
+    return `
+Tracked projects:
 ${projects
 .map((project, index) => {
 return `${index + 1}. ${project.name}
