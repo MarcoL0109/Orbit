@@ -228,7 +228,7 @@ ${skippedText}
 			},
 		]);
 		setIsThinking(false);
-};
+	};
 
 
 	const handleProjectPath = () => {

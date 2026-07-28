@@ -134,9 +134,7 @@ Available Orbit commands:
         args_nums: 0,
         handler: async (_args, context) => {
             const stop = checkParamsNums(0, _args.length, context);
-            if (stop) {
-                return;
-            }
+            if (stop) return;
             if (!context.project) {
                 context.setMessages((prev) => [
                     ...prev,

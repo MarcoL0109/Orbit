@@ -631,3 +631,4 @@ export function writeProjectMap(projectRoot: string, projectMap: ProjectMap) {
 
   return projectMapPath;
 }
+
