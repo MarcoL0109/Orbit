@@ -1,5 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { walkProjectFiles } from './path.js';
+
+// when we scan the project, we want to compute the checksum fingerprint as well.
 
 
 export type ProjectMap = {
@@ -74,19 +77,6 @@ type PackageJson = {
   devDependencies?: Record<string, string>;
 };
 
-const IGNORE_DIRS = new Set([
-  'node_modules',
-  '.git',
-  '.orbit',
-  'dist',
-  'build',
-  'coverage',
-  '.next',
-  '.turbo',
-  'playwright-report',
-  'test-results',
-]);
-
 const SOURCE_EXTENSIONS = new Set([
   '.ts',
   '.tsx',
@@ -97,26 +87,28 @@ const SOURCE_EXTENSIONS = new Set([
   '.mjs',
   '.cjs',
 ]);
-
 const MARKDOWN_EXTENSIONS = new Set(['.md', '.mdx']);
 
-const IMPORTANT_FILES = new Set([
-  'package.json',
-  'tsconfig.json',
-  'vite.config.ts',
-  'vite.config.js',
-  'vite.config.mts',
-  'next.config.ts',
-  'next.config.js',
-  'next.config.mjs',
-  'playwright.config.ts',
-  'playwright.config.js',
-  'cypress.config.ts',
-  'cypress.config.js',
-  'vitest.config.ts',
-  'vitest.config.js',
-  'README.md',
-]);
+
+export function formatScanResult(projectMap: ProjectMap, projectMapPath: string) {
+    return `Project scan complete.
+
+Detected:
+- Framework: ${projectMap.framework ?? 'Unknown'}
+- Package manager: ${projectMap.packageManager ?? 'Unknown'}
+- Test framework: ${projectMap.testFramework ?? 'Unknown'}
+
+Found:
+- Routes: ${projectMap.routes.length}
+- Components: ${projectMap.components.length}
+- Tests: ${projectMap.tests.length}
+- Config files: ${projectMap.configs.length}
+- Files scanned: ${projectMap.filesScanned}
+
+Saved:
+- ${projectMapPath}`
+}
+
 
 export async function scanProject(projectRoot: string): Promise<ProjectMap> {
   const files = walkProjectFiles(projectRoot);
@@ -172,49 +164,6 @@ export async function scanProject(projectRoot: string): Promise<ProjectMap> {
   };
 }
 
-function walkProjectFiles(projectRoot: string) {
-  const results: string[] = [];
-
-  function walk(currentDir: string) {
-    const entries = fs.readdirSync(currentDir, {
-      withFileTypes: true,
-    });
-
-    for (const entry of entries) {
-      const absolutePath = path.join(currentDir, entry.name);
-      const relativePath = path.relative(projectRoot, absolutePath);
-      const normalizedPath = relativePath.split(path.sep).join('/');
-
-      if (entry.isDirectory()) {
-        if (IGNORE_DIRS.has(entry.name)) {
-          continue;
-        }
-
-        walk(absolutePath);
-        continue;
-      }
-
-      if (!entry.isFile()) {
-        continue;
-      }
-
-      const ext = path.extname(entry.name);
-      const base = path.basename(entry.name);
-
-      if (
-        SOURCE_EXTENSIONS.has(ext) ||
-        MARKDOWN_EXTENSIONS.has(ext) ||
-        IMPORTANT_FILES.has(base)
-      ) {
-        results.push(normalizedPath);
-      }
-    }
-  }
-
-  walk(projectRoot);
-
-  return results.sort();
-}
 
 function classifyFile(projectRoot: string, file: string): ScannedFile {
   const base = path.basename(file);
@@ -626,9 +575,7 @@ export function writeProjectMap(projectRoot: string, projectMap: ProjectMap) {
   });
 
   const projectMapPath = path.join(indexDir, 'project-map.json');
-
   fs.writeFileSync(projectMapPath, JSON.stringify(projectMap, null, 2), 'utf8');
-
   return projectMapPath;
 }
 

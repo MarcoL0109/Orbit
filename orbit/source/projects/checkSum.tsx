@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { walkProjectFiles } from './path.js';
 
 
 export type ChecksumsFile = {
@@ -24,7 +25,6 @@ export type FileChecksumEntry = {
     sizeBytes: number;
     modifiedAt: string;
     scannedAt: string;
-    role?: string;
 };
 
 
@@ -38,9 +38,8 @@ export function computeFileChecksum(filePath: string) {
 }
 
 
-export function buildChecksumsFile(projectRoot: string, files: Array<{file: string; role?: string}>): ChecksumsFile {
+export function buildChecksumsFile(projectRoot: string, files: Array<{file: string;}>): ChecksumsFile {
     const now = new Date().toISOString();
-
     const entries: Record<string, FileChecksumEntry> = {};
 
     for (const file of files) {
@@ -52,7 +51,6 @@ export function buildChecksumsFile(projectRoot: string, files: Array<{file: stri
             sizeBytes: stats.size,
             modifiedAt: stats.mtime.toISOString(),
             scannedAt: now,
-            role: file.role,
         };
     }
 
@@ -106,4 +104,20 @@ export function compareChecksums(oldChecksums: ChecksumsFile | null, newChecksum
         unchanged,
         deleted,
     };
+}
+
+
+export function writeChecksumFile(projectRoot: string) {
+    const files = walkProjectFiles(projectRoot);
+    const checksumFiles = files.map((file) => ({ file }));
+    const checksum = buildChecksumsFile(projectRoot, checksumFiles);
+    const indexDir = path.join(projectRoot, '.orbit', 'index');
+      
+    fs.mkdirSync(indexDir, {
+        recursive: true,
+    });
+
+    const checksumsJsonPath = path.join(indexDir, 'checksums.json');
+    fs.writeFileSync(checksumsJsonPath, JSON.stringify(checksum, null, 2), 'utf8');
+    return checksumsJsonPath;
 }

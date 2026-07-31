@@ -2,6 +2,52 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+
+const IGNORE_DIRS = new Set([
+  'node_modules',
+  '.git',
+  '.orbit',
+  'dist',
+  'build',
+  'coverage',
+  '.next',
+  '.turbo',
+  'playwright-report',
+  'test-results',
+]);
+
+const SOURCE_EXTENSIONS = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mts',
+  '.cts',
+  '.mjs',
+  '.cjs',
+]);
+
+const MARKDOWN_EXTENSIONS = new Set(['.md', '.mdx']);
+const IMPORTANT_FILES = new Set([
+  'package.json',
+  'tsconfig.json',
+  'vite.config.ts',
+  'vite.config.js',
+  'vite.config.mts',
+  'next.config.ts',
+  'next.config.js',
+  'next.config.mjs',
+  'playwright.config.ts',
+  'playwright.config.js',
+  'cypress.config.ts',
+  'cypress.config.js',
+  'vitest.config.ts',
+  'vitest.config.js',
+  'README.md',
+]);
+
+
+
 export function resolveUserPath(input: string, baseDir = process.cwd()) {
   let rawPath = input.trim();
 
@@ -52,4 +98,48 @@ export function validateProjectPath(input: string, baseDir = process.cwd()) {
     ok: true as const,
     path: resolvedPath,
   };
+}
+
+export function walkProjectFiles(projectRoot: string) {
+  const results: string[] = [];
+
+  function walk(currentDir: string) {
+    const entries = fs.readdirSync(currentDir, {
+      withFileTypes: true,
+    });
+
+    for (const entry of entries) {
+      const absolutePath = path.join(currentDir, entry.name);
+      const relativePath = path.relative(projectRoot, absolutePath);
+      const normalizedPath = relativePath.split(path.sep).join('/');
+
+      if (entry.isDirectory()) {
+        if (IGNORE_DIRS.has(entry.name)) {
+          continue;
+        }
+
+        walk(absolutePath);
+        continue;
+      }
+
+      if (!entry.isFile()) {
+        continue;
+      }
+
+      const ext = path.extname(entry.name);
+      const base = path.basename(entry.name);
+
+      if (
+        SOURCE_EXTENSIONS.has(ext) ||
+        MARKDOWN_EXTENSIONS.has(ext) ||
+        IMPORTANT_FILES.has(base)
+      ) {
+        results.push(normalizedPath);
+      }
+    }
+  }
+
+  walk(projectRoot);
+
+  return results.sort();
 }

@@ -11,10 +11,11 @@ import type { InitFileAction } from './init/init.js';
 import type { Message, ProjectOptions, ProjectInfo } from './commands/context.js'
 import { runCommand } from './commands/runCommand.js';
 import { getBestCommandCompletion, getGhostCompletion } from './commands/autocomplete.js';
-import { formatScanResult } from "./commands/commands.js";
+import { formatScanResult } from './projects/scan.js';
 import { readGlobalProjects } from './projects/readProjectMem.js';
 import { scanProject, writeProjectMap } from './projects/scan.js';
 import { deinitLocalContext, getProjectPath, deinitGlobalContext } from './init/deinit.js';
+import { writeChecksumFile } from './projects/checkSum.js';
 
 
 
@@ -316,7 +317,7 @@ Global memory updated:
 				if (project.root) {
 					const projectMap = await scanProject(project.root);
 					const projectMapPath = writeProjectMap(project.root, projectMap);
-
+					writeChecksumFile(project.root);
 					setMessages((prev) => [
 						...prev,
 						{
@@ -326,7 +327,6 @@ Global memory updated:
 						},
 					]);
 				}
-				
 			}
 			catch (error) {
 				setMessages((prev) => [

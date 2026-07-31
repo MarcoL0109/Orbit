@@ -59,21 +59,6 @@ export function initOrbitProject({
       maxRepairAttempts: 3,
     }),
 
-    writeJsonIfMissing(projectRoot, path.join(indexDir, 'project-map.json'), {
-      generatedAt: now,
-      routes: [],
-      components: [],
-      tests: [],
-      scripts: {},
-      dependencies: {},
-      notes: [],
-    }),
-
-    writeJsonIfMissing(projectRoot, path.join(indexDir, 'checksums.json'), {
-      generatedAt: now,
-      files: {},
-    }),
-
     writeTextIfMissing(
       projectRoot,
       path.join(memoryDir, 'overview.md'),

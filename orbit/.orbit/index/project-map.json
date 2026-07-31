@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-21T07:48:09.637Z",
+  "generatedAt": "2026-07-30T08:41:09.835Z",
   "projectRoot": "/Users/marcolau/Documents/GitHub/Orbit/orbit",
   "framework": "React",
   "packageManager": "npm",
@@ -86,12 +86,13 @@
         "./init/init.js",
         "./init/init.js",
         "./commands/context.js",
-        "./commands/rumCommand.js",
+        "./commands/runCommand.js",
         "./commands/autocomplete.js",
         "./commands/commands.js",
         "./projects/readProjectMem.js",
         "./projects/scan.js",
-        "./init/deinit.js"
+        "./init/deinit.js",
+        "./projects/checkSum.js"
       ],
       "exports": [
         "App"
@@ -168,7 +169,8 @@
         "../projects/search.js",
         "../ai_models/prompt.js",
         "../projects/scan.js",
-        "../projects/scan.js"
+        "../projects/scan.js",
+        "../init/deinit.js"
       ],
       "exports": [
         "parseCommand",
@@ -231,7 +233,7 @@
       ]
     },
     {
-      "file": "source/commands/rumCommand.tsx",
+      "file": "source/commands/runCommand.tsx",
       "role": "command",
       "extension": ".tsx",
       "featureGuess": "commands",
@@ -257,12 +259,16 @@
       ],
       "imports": [
         "node:fs",
-        "../commands/context.js"
+        "../commands/context.js",
+        "../projects/readProjectMem.js",
+        "../init/initMark.js"
       ],
       "exports": [
         "DeinitResponse",
+        "DeinitGlobalContextResponse",
         "getProjectPath",
-        "deinitContext"
+        "deinitLocalContext",
+        "deinitGlobalContext"
       ],
       "textSignals": []
     },
@@ -309,6 +315,31 @@
       "textSignals": []
     },
     {
+      "file": "source/projects/checkSum.tsx",
+      "role": "component",
+      "extension": ".tsx",
+      "featureGuess": "projects",
+      "reasons": [
+        "tsx/jsx source file"
+      ],
+      "imports": [
+        "node:crypto",
+        "node:fs",
+        "node:path",
+        "./path.js"
+      ],
+      "exports": [
+        "ChecksumsFile",
+        "ChecksumDiff",
+        "FileChecksumEntry",
+        "computeFileChecksum",
+        "buildChecksumsFile",
+        "compareChecksums",
+        "writeChecksumFile"
+      ],
+      "textSignals": []
+    },
+    {
       "file": "source/projects/path.tsx",
       "role": "component",
       "extension": ".tsx",
@@ -323,7 +354,8 @@
       ],
       "exports": [
         "resolveUserPath",
-        "validateProjectPath"
+        "validateProjectPath",
+        "walkProjectFiles"
       ],
       "textSignals": []
     },
@@ -338,7 +370,8 @@
       "imports": [
         "node:fs",
         "node:os",
-        "node:path"
+        "node:path",
+        "../init/initMark.js"
       ],
       "exports": [
         "getGlobalProjectsPath",
@@ -357,7 +390,8 @@
       ],
       "imports": [
         "node:fs",
-        "node:path"
+        "node:path",
+        "./path.js"
       ],
       "exports": [
         "ProjectMap",
@@ -447,6 +481,11 @@
       "featureGuess": "init"
     },
     {
+      "name": "checkSum",
+      "file": "source/projects/checkSum.tsx",
+      "featureGuess": "projects"
+    },
+    {
       "name": "path",
       "file": "source/projects/path.tsx",
       "featureGuess": "projects"
@@ -506,7 +545,8 @@
         "../projects/search.js",
         "../ai_models/prompt.js",
         "../projects/scan.js",
-        "../projects/scan.js"
+        "../projects/scan.js",
+        "../init/deinit.js"
       ],
       "exports": [
         "parseCommand",
@@ -569,7 +609,7 @@
       ]
     },
     {
-      "file": "source/commands/rumCommand.tsx",
+      "file": "source/commands/runCommand.tsx",
       "role": "command",
       "extension": ".tsx",
       "featureGuess": "commands",
@@ -611,5 +651,5 @@
     "package.json",
     "tsconfig.json"
   ],
-  "filesScanned": 19
+  "filesScanned": 20
 }

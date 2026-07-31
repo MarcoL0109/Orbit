@@ -3,8 +3,8 @@ import {readGlobalProjects, formatProjectsForTui} from '../projects/readProjectM
 import { getProjectDisplayName } from "../projects/search.js";
 import { askModel } from '../ai_models/prompt.js';
 import {scanProject, writeProjectMap} from '../projects/scan.js';
-import type { ProjectMap } from '../projects/scan.js';
 import { getProjectPath } from '../init/deinit.js';
+import { formatScanResult } from "../projects/scan.js";
 
 
 // I need some sort of checking whether the number of parameter passed to the command is correct or not
@@ -32,26 +32,6 @@ export function parseCommand(input: string) {
         };
     }
     return null;
-}
-
-
-export function formatScanResult(projectMap: ProjectMap, projectMapPath: string) {
-    return `Project scan complete.
-
-Detected:
-- Framework: ${projectMap.framework ?? 'Unknown'}
-- Package manager: ${projectMap.packageManager ?? 'Unknown'}
-- Test framework: ${projectMap.testFramework ?? 'Unknown'}
-
-Found:
-- Routes: ${projectMap.routes.length}
-- Components: ${projectMap.components.length}
-- Tests: ${projectMap.tests.length}
-- Config files: ${projectMap.configs.length}
-- Files scanned: ${projectMap.filesScanned}
-
-Saved:
-- ${projectMapPath}`
 }
 
 
