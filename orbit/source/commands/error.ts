@@ -11,6 +11,7 @@ export type OrbitError =
     | {kind: 'unknown-command'; commandName: string}
     | {kind: 'no-project-selected'}
     | {kind: 'project-already-initialized'}
+    | {kind: 'project-not-initialized'}
     | {kind: 'post-init-scan-failed'; cause: unknown}
     | {kind: 'unexpected'; action: string; cause: unknown};
 
@@ -36,6 +37,8 @@ Type /help to see available commands.`;
             return 'No valid project selected. Please select or open a project first.';
         case 'project-already-initialized':
             return 'Orbit context is already initialized. You can use /scan to refresh the context, or delete the .orbit folder and run /init again.';
+        case 'project-not-initialized':
+            return 'This project has no Orbit context yet. Run /init first.';
         case 'post-init-scan-failed':
             return `Project initialized, but the initial scan failed: ${causeMessage(error.cause)}`;
         case 'unexpected':

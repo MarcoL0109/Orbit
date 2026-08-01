@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { OrbitConfig } from './config.js';
 
 type InitOrbitProjectOptions = {
   projectRoot: string;
@@ -57,7 +58,7 @@ export function initOrbitProject({
       testDir: 'tests/e2e',
       writeMode: 'ask',
       maxRepairAttempts: 3,
-    }),
+    } satisfies OrbitConfig),
 
     writeTextIfMissing(
       projectRoot,

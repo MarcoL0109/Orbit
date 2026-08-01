@@ -41,4 +41,5 @@ export type CommandContext = {
     clearAbortableTask: () => void;
     abortCurrentTask: () => boolean;
     setConfirmDeinit: React.Dispatch<React.SetStateAction<boolean>>;
+    requestApproval: (description: string) => Promise<boolean>;
 };

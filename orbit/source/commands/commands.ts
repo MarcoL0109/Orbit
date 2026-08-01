@@ -1,7 +1,9 @@
 import type { CommandContext } from "./context.js";
 import {readGlobalProjects, formatProjectsForTui} from '../registry/knownProjects.js';
 import { getProjectDisplayName } from "../projects/search.js";
-import { askModel } from '../ai/prompt.js';
+import { runTestingAgent } from '../ai/agent.js';
+import { writeAgentSession } from '../ai/session.js';
+import { readOrbitConfig } from '../init/config.js';
 import {scanProject, writeProjectMap} from '../projects/scan.js';
 import { getProjectPath } from '../init/deinit.js';
 import { formatScanResult } from "../projects/scan.js";
@@ -40,6 +42,7 @@ Available Orbit commands:
 /init       Initialize Orbit for this project
 /deinit     Delete the .orbit folder within the current project
 /scan       Build index and context for the current project
+/test       Generate and run a Playwright test for a feature you describe
 /projects   Show remembered projects
 /memory     Show project memory
 /clear      Clear the screen
@@ -135,35 +138,52 @@ Available Orbit commands:
     },
 
     {
-        // This is a beta command. This should be removed at the end
-        name: "ai",
-        description: "Just a mock testing to see whether the model is working in Orbit",
-        usage: '/ai <prompt>',
+        name: "test",
+        description: "Generate and run a Playwright test for a feature you describe",
+        usage: '/test <prompt>',
         argsRule: {min: 1},
         handler: async (_args, context) => {
             const prompt = _args.join(' ').trim();
+
+            if (!context.project?.root) {
+                reportError(context.setMessages, {kind: 'no-project-selected'});
+                return;
+            }
+
+            const orbitConfig = context.project.hasOrbitFolder
+                ? readOrbitConfig(context.project.root)
+                : null;
+
+            if (!orbitConfig) {
+                reportError(context.setMessages, {kind: 'project-not-initialized'});
+                return;
+            }
 
             try {
                 context.setIsThinking(true);
                 const controller = context.startAbortableTask();
 
-                const response = await askModel({
-                    prompt,
+                const result = await runTestingAgent(prompt, {
+                    projectRoot: context.project.root,
+                    orbitConfig,
                     signal: controller.signal,
+                    requestApproval: context.requestApproval,
                 });
+
+                writeAgentSession(context.project.root, prompt, result);
 
                 context.setMessages((prev) => [
                     ...prev,
                     {
                         role: 'agent',
-                        content: response,
-                        color: 'green',
+                        content: result.summary,
+                        color: result.status === 'passed' ? 'green' : result.status === 'aborted' ? 'yellow' : 'red',
                     },
                 ]);
             } catch (error) {
                 reportError(context.setMessages, {
                     kind: 'unexpected',
-                    action: 'AI request',
+                    action: 'Test agent run',
                     cause: error,
                 });
             } finally {

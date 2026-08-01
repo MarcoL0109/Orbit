@@ -38,6 +38,7 @@ export function App({ initialPrompt }: AppProps) {
 	const [checkName, setCheckName] = useState<boolean>(false);
 	const [confirmDeinit, setConfirmDeinit] = useState<boolean>(false);
 	const [confirmName, setConfirmName] = useState<string>("");
+	const [pendingApproval, setPendingApproval] = useState<{description: string; resolve: (approved: boolean) => void} | null>(null);
 	const currentAbortControllerRef = useRef<AbortController | null>(null);
 	const ghostCompletetion = getGhostCompletion(query);
 	const confirmationOptions = [{label: "Confirm", value: "confirm"}, {label: "Cancel", value: "cancel"}]
@@ -97,6 +98,19 @@ export function App({ initialPrompt }: AppProps) {
 
 	function clearAbortableTask() {
 		currentAbortControllerRef.current = null;
+	}
+
+
+	function requestApproval(description: string): Promise<boolean> {
+		return new Promise((resolve) => {
+			setPendingApproval({description, resolve});
+		});
+	}
+
+
+	function handleApprovalSelect(item: any) {
+		pendingApproval?.resolve(item.value === 'approve');
+		setPendingApproval(null);
 	}
 
 
@@ -192,6 +206,7 @@ ${skippedText}
   			clearAbortableTask,
   			abortCurrentTask,
 			setConfirmDeinit,
+			requestApproval,
 		});
 
 		if (commandHandled) {
@@ -460,7 +475,7 @@ Global memory updated:
 			))}
 		</Box>
 
-		{isBooting || selectProjectMode || confirmDeinit || checkName || isInitting ? (
+		{isBooting || selectProjectMode || confirmDeinit || checkName || isInitting || pendingApproval ? (
 			<Box marginTop={1}>
 				<Text color="yellow">
 					<Spinner type="dots" /> Selection Menu In Progress...
@@ -541,6 +556,18 @@ Global memory updated:
 					<SelectInput
 						items={confirmationOptions}
 						onSelect={handleConfirmDeinit}
+					/>
+				</Box>
+			)
+		}
+
+		{
+			pendingApproval && (
+				<Box flexDirection="column">
+					<Text color="yellow">Orbit wants to: {pendingApproval.description}</Text>
+					<SelectInput
+						items={[{label: "Approve", value: "approve"}, {label: "Deny", value: "deny"}]}
+						onSelect={handleApprovalSelect}
 					/>
 				</Box>
 			)
