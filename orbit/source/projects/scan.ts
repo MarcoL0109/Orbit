@@ -705,7 +705,7 @@ function getProjectMapPath(projectRoot: string) {
   return path.join(projectRoot, '.orbit', 'index', 'project-map.json');
 }
 
-function readProjectMap(projectRoot: string): ProjectMap | null {
+export function readProjectMap(projectRoot: string): ProjectMap | null {
   const projectMapPath = getProjectMapPath(projectRoot);
 
   if (!fs.existsSync(projectMapPath)) {

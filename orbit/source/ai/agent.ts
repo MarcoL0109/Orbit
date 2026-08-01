@@ -3,6 +3,7 @@ import { createOpenAIClient } from './client.js';
 import { toolRegistry, findTool, toApiToolSchema, type ToolContext, type ToolResult } from './tools/index.js';
 import type { ReportResultArgs } from './tools/reportResult.js';
 import type { RunTestResult } from './tools/runTest.js';
+import { readProjectMap, type ProjectMap } from '../projects/scan.js';
 
 // Only what the loop actually calls — accepted as a dependency rather than
 // constructed internally, so the loop is testable without a live API key.
@@ -43,10 +44,47 @@ export type RunTestingAgentOptions = {
     onProgress?: (event: AgentProgressEvent) => void;
 };
 
-function buildSystemPrompt(context: ToolContext): string {
+const MAX_LISTED_ITEMS = 50;
+
+function formatList(items: string[]): string {
+    if (items.length === 0) return 'None detected';
+    const shown = items.slice(0, MAX_LISTED_ITEMS);
+    const remainder = items.length - shown.length;
+    return shown.join('\n') + (remainder > 0 ? `\n...and ${remainder} more` : '');
+}
+
+// Reuses whatever /scan already computed instead of leaving the model to
+// guess file paths blind — read_file still exists for the actual deep dive
+// once it knows which file is relevant.
+function summarizeProjectMap(projectMap: ProjectMap | null): string {
+    if (!projectMap) {
+        return 'No project index available yet (run /scan first for a list of known routes and components) — you will need to find files by informed guesswork.';
+    }
+
+    const routes = projectMap.routes.map((route) => `- ${route.route} -> ${route.file}`);
+    const components = projectMap.components.map((component) => `- ${component.name} -> ${component.file}`);
+    const tests = projectMap.tests.map((test) => `- ${test.file}`);
+
+    return `Known project structure (from the last /scan, ${projectMap.generatedAt}):
+
+Routes:
+${formatList(routes)}
+
+Components:
+${formatList(components)}
+
+Existing tests:
+${formatList(tests)}`;
+}
+
+function buildSystemPrompt(context: ToolContext, projectMap: ProjectMap | null): string {
     return `You are Orbit, an AI QA agent for E2E testing.
 
 Your job: given a description of a feature to test, write a Playwright test for it using the write_test_file tool, then run it using the run_test tool.
+
+${summarizeProjectMap(projectMap)}
+
+Use this index to find the right file to read before writing selectors — prefer it over guessing paths. If the feature you're asked to test isn't listed, use read_file to explore starting from a route or component that seems related.
 
 If a run fails because of a broken selector or similar test-side issue, you may patch the test and run it again — you have a budget of ${context.orbitConfig.maxRepairAttempts} repair attempts for this task. If a run fails because of an actual application bug (not a problem with the test itself), do not keep patching it — report the failure instead.
 
@@ -80,6 +118,7 @@ export async function runTestingAgent(
 ): Promise<AgentRunResult> {
     const maxSteps = options.maxSteps ?? 20;
     const client = options.client ?? createOpenAIClient();
+    const projectMap = readProjectMap(context.projectRoot);
     const steps: AgentStep[] = [];
 
     let previousResponseId: string | undefined;
@@ -92,7 +131,7 @@ export async function runTestingAgent(
 
         const response = await client.responses.create({
             model: 'gpt-5.2',
-            instructions: buildSystemPrompt(context),
+            instructions: buildSystemPrompt(context, projectMap),
             input: nextInput,
             previous_response_id: previousResponseId,
             tools: toolRegistry.map(toApiToolSchema),

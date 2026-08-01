@@ -16,6 +16,13 @@ export type ToolContext = {
 
 // A minimal JSON Schema object — only what's needed to describe a tool's
 // parameters to the model, not a general-purpose schema type.
+//
+// Tools are registered in strict mode (see toApiToolSchema), which the API
+// enforces via constrained decoding — every property must be listed in
+// `required`; there is no such thing as an omittable property. Represent an
+// optional argument as a nullable type instead, e.g.
+// `{type: ['string', 'null']}` with the name still present in `required`,
+// and treat `null` as "not provided" in `execute`. See run_test's filePath.
 export type JsonSchema = {
     type: 'object';
     properties: Record<string, unknown>;

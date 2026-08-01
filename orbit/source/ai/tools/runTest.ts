@@ -131,7 +131,7 @@ export function parsePlaywrightJsonReport(raw: string, reportPath: string): RunT
 }
 
 type RunTestArgs = {
-    filePath?: string;
+    filePath: string | null;
 };
 
 export const runTestTool: ToolDefinition<RunTestArgs, RunTestResult> = {
@@ -142,11 +142,11 @@ export const runTestTool: ToolDefinition<RunTestArgs, RunTestResult> = {
         type: 'object',
         properties: {
             filePath: {
-                type: 'string',
-                description: 'Path relative to the test directory, to run only one file. Omit to run the whole suite.',
+                type: ['string', 'null'],
+                description: 'Path relative to the test directory, to run only one file, or null to run the whole suite.',
             },
         },
-        required: [],
+        required: ['filePath'],
     },
     execute: async ({filePath}, context) => {
         const binPath = findPlaywrightBinary(context.projectRoot);

@@ -161,8 +161,25 @@ Available Orbit commands:
 
             try {
                 context.setIsThinking(true);
-                context.setAgentActivity('Analyzing the request...');
                 const controller = context.startAbortableTask();
+
+                // Keep the project index fresh before every run — cheap in
+                // practice since scanProject skips unchanged files by
+                // mtime/size, and non-fatal if it fails: the agent still
+                // works from whatever map (if any) was already on disk.
+                try {
+                    context.setAgentActivity('Scanning project for changes...');
+                    const projectMap = await scanProject(context.project.root);
+                    writeProjectMap(context.project.root, projectMap);
+                } catch (error) {
+                    reportError(context.setMessages, {
+                        kind: 'unexpected',
+                        action: 'Pre-test project scan',
+                        cause: error,
+                    });
+                }
+
+                context.setAgentActivity('Analyzing the request...');
 
                 const result = await runTestingAgent(prompt, {
                     projectRoot: context.project.root,
