@@ -1,7 +1,7 @@
 import type { CommandContext } from "./context.js";
 import {readGlobalProjects, formatProjectsForTui} from '../registry/knownProjects.js';
 import { getProjectDisplayName } from "../projects/search.js";
-import { runTestingAgent } from '../ai/agent.js';
+import { runTestingAgent, formatAgentRunResult, describeAgentActivity } from '../ai/agent.js';
 import { writeAgentSession } from '../ai/session.js';
 import { readOrbitConfig } from '../init/config.js';
 import {scanProject, writeProjectMap} from '../projects/scan.js';
@@ -161,6 +161,7 @@ Available Orbit commands:
 
             try {
                 context.setIsThinking(true);
+                context.setAgentActivity('Analyzing the request...');
                 const controller = context.startAbortableTask();
 
                 const result = await runTestingAgent(prompt, {
@@ -168,6 +169,8 @@ Available Orbit commands:
                     orbitConfig,
                     signal: controller.signal,
                     requestApproval: context.requestApproval,
+                }, {
+                    onProgress: (event) => context.setAgentActivity(describeAgentActivity(event)),
                 });
 
                 writeAgentSession(context.project.root, prompt, result);
@@ -176,7 +179,7 @@ Available Orbit commands:
                     ...prev,
                     {
                         role: 'agent',
-                        content: result.summary,
+                        content: formatAgentRunResult(result),
                         color: result.status === 'passed' ? 'green' : result.status === 'aborted' ? 'yellow' : 'red',
                     },
                 ]);
@@ -188,6 +191,7 @@ Available Orbit commands:
                 });
             } finally {
                 context.setIsThinking(false);
+                context.setAgentActivity(null);
                 context.clearAbortableTask();
             }
         }

@@ -39,6 +39,7 @@ export function App({ initialPrompt }: AppProps) {
 	const [confirmDeinit, setConfirmDeinit] = useState<boolean>(false);
 	const [confirmName, setConfirmName] = useState<string>("");
 	const [pendingApproval, setPendingApproval] = useState<{description: string; resolve: (approved: boolean) => void} | null>(null);
+	const [agentActivity, setAgentActivity] = useState<string | null>(null);
 	const currentAbortControllerRef = useRef<AbortController | null>(null);
 	const ghostCompletetion = getGhostCompletion(query);
 	const confirmationOptions = [{label: "Confirm", value: "confirm"}, {label: "Cancel", value: "cancel"}]
@@ -122,6 +123,7 @@ export function App({ initialPrompt }: AppProps) {
 		currentAbortControllerRef.current = null;
 		setIsThinking(false);
 		setIsInitting(false);
+		setAgentActivity(null);
 		return true;
 	}
 
@@ -189,6 +191,14 @@ ${skippedText}
 		if (!prompt) return;
 		setQuery('');
 
+		setMessages((prev) => [
+			...prev,
+			{
+				role: 'user',
+				content: prompt,
+			},
+		]);
+
 		const commandHandled = await runCommand(prompt, {
 			setMessages,
 			setQuery,
@@ -207,6 +217,7 @@ ${skippedText}
   			abortCurrentTask,
 			setConfirmDeinit,
 			requestApproval,
+			setAgentActivity,
 		});
 
 		if (commandHandled) {
@@ -224,14 +235,6 @@ ${skippedText}
 			]);
 			return;
 		}
-
-		setMessages((prev) => [
-			...prev,
-			{
-				role: 'user',
-				content: prompt,
-			},
-		]);
 
 		setIsThinking(true);
 		setMessages((prev) => [
@@ -544,7 +547,7 @@ Global memory updated:
 		{
 			isThinking && (
 				<Text color="yellow">
-					<Spinner type="dots" /> Orbit's thinking...
+					<Spinner type="dots" /> {agentActivity ?? "Orbit's thinking..."}
 				</Text>
 			)
 		}

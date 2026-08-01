@@ -2,6 +2,7 @@ import type { Response, ResponseCreateParamsNonStreaming, ResponseFunctionToolCa
 import { createOpenAIClient } from './client.js';
 import { toolRegistry, findTool, toApiToolSchema, type ToolContext, type ToolResult } from './tools/index.js';
 import type { ReportResultArgs } from './tools/reportResult.js';
+import type { RunTestResult } from './tools/runTest.js';
 
 // Only what the loop actually calls — accepted as a dependency rather than
 // constructed internally, so the loop is testable without a live API key.
@@ -19,6 +20,27 @@ export type AgentRunResult = {
     status: 'passed' | 'failed' | 'gave_up' | 'aborted';
     summary: string;
     steps: AgentStep[];
+};
+
+// Fired as each tool call starts, so the UI can show something more useful
+// than a static "thinking" spinner while the loop runs.
+export type AgentProgressEvent = {name: string};
+
+const ACTIVITY_LABEL: Record<string, string> = {
+    read_file: 'Reading project files...',
+    write_test_file: 'Writing the test file...',
+    run_test: 'Running the test...',
+    report_result: 'Wrapping up...',
+};
+
+export function describeAgentActivity(event: AgentProgressEvent): string {
+    return ACTIVITY_LABEL[event.name] ?? `Running ${event.name}...`;
+}
+
+export type RunTestingAgentOptions = {
+    maxSteps?: number;
+    client?: ResponsesClient;
+    onProgress?: (event: AgentProgressEvent) => void;
 };
 
 function buildSystemPrompt(context: ToolContext): string {
@@ -54,9 +76,10 @@ function extractFunctionCalls(response: Response): ResponseFunctionToolCall[] {
 export async function runTestingAgent(
     prompt: string,
     context: ToolContext,
-    maxSteps = 20,
-    client: ResponsesClient = createOpenAIClient(),
+    options: RunTestingAgentOptions = {},
 ): Promise<AgentRunResult> {
+    const maxSteps = options.maxSteps ?? 20;
+    const client = options.client ?? createOpenAIClient();
     const steps: AgentStep[] = [];
 
     let previousResponseId: string | undefined;
@@ -93,6 +116,7 @@ export async function runTestingAgent(
         for (const call of functionCalls) {
             const args = parseToolArguments(call.arguments);
             steps.push({type: 'tool_call', name: call.name, args});
+            options.onProgress?.({name: call.name});
 
             const tool = findTool(call.name);
             const result: ToolResult = tool
@@ -125,4 +149,52 @@ export async function runTestingAgent(
         summary: `Stopped after ${maxSteps} steps without a final result`,
         steps,
     };
+}
+
+const STATUS_LABEL: Record<AgentRunResult['status'], string> = {
+    passed: 'Test passed',
+    failed: 'Test failed',
+    gave_up: 'Gave up',
+    aborted: 'Aborted',
+};
+
+export function formatAgentRunResult(result: AgentRunResult): string {
+    const filesWritten = new Set<string>();
+    let runCount = 0;
+    let lastRunResult: RunTestResult | null = null;
+
+    for (const step of result.steps) {
+        if (step.type === 'tool_call' && step.name === 'write_test_file') {
+            const args = step.args as {relativePath?: string};
+            if (args.relativePath) filesWritten.add(args.relativePath);
+        }
+
+        if (step.type === 'tool_result' && step.name === 'run_test' && step.result.ok) {
+            runCount++;
+            lastRunResult = step.result.data as RunTestResult;
+        }
+    }
+
+    const filesText = filesWritten.size > 0
+        ? [...filesWritten].map((file) => `- ${file}`).join('\n')
+        : 'None';
+
+    const testsText = lastRunResult
+        ? `${lastRunResult.passedCount}/${lastRunResult.totalTests} passed (${lastRunResult.durationMs}ms)`
+        : 'Not run';
+
+    const attemptsText = runCount > 1 ? `\nRun attempts: ${runCount}` : '';
+
+    const failuresText = lastRunResult && lastRunResult.failures.length > 0
+        ? `\n\nFailures:\n${lastRunResult.failures
+            .map((failure) => `- ${failure.testTitle}: ${failure.errorMessage}`)
+            .join('\n')}`
+        : '';
+
+    return `${STATUS_LABEL[result.status]}: ${result.summary}
+
+Files written:
+${filesText}
+
+Tests: ${testsText}${attemptsText}${failuresText}`;
 }
