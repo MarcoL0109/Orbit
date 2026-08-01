@@ -89,7 +89,7 @@ ${summarizeProjectMap(projectMap)}
 
 Use this index to find the right file to read before writing selectors — prefer it over guessing paths. If a feature you're asked to test isn't listed, use read_file to explore starting from a route or component that seems related.
 
-If a run fails because of a broken selector or similar test-side issue, you may patch that feature's file and run it again — you have a budget of ${context.orbitConfig.maxRepairAttempts} repair attempts per feature. If a run fails because of an actual application bug (not a problem with the test itself), do not keep patching it — report that feature as failed instead.
+If a run fails because of a broken selector or similar test-side issue, you may patch that feature's test file and run it again — you have a budget of ${context.orbitConfig.maxRepairAttempts} repair attempts per feature. If a run fails because of an actual application bug (not a problem with the test itself), do not keep patching it — report that feature as failed instead.
 
 Rules:
 - Prefer Playwright and role-based selectors (getByRole, getByLabel, getByText).
