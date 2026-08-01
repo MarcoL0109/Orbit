@@ -14,6 +14,16 @@ const IGNORE_DIRS = new Set([
   '.turbo',
   'playwright-report',
   'test-results',
+  '.cache',
+  '.output',
+  '.vercel',
+  '.svelte-kit',
+  '.parcel-cache',
+  '.pnpm-store',
+  'venv',
+  '.venv',
+  '__pycache__',
+  'tmp',
 ]);
 
 const SOURCE_EXTENSIONS = new Set([
@@ -100,8 +110,50 @@ export function validateProjectPath(input: string, baseDir = process.cwd()) {
   };
 }
 
+// Only supports plain directory/file names (no globs, no negation, no
+// nested paths) — full gitignore semantics are out of scope for this
+// lightweight scanner.
+function readGitignoreNames(projectRoot: string): Set<string> {
+  const gitignorePath = path.join(projectRoot, '.gitignore');
+  const names = new Set<string>();
+
+  if (!fs.existsSync(gitignorePath)) {
+    return names;
+  }
+
+  let lines: string[] = [];
+
+  try {
+    lines = fs.readFileSync(gitignorePath, 'utf8').split('\n');
+  } catch {
+    return names;
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (
+      !line ||
+      line.startsWith('#') ||
+      line.startsWith('!') ||
+      line.includes('*') ||
+      line.includes('/')
+    ) {
+      continue;
+    }
+
+    names.add(line);
+  }
+
+  return names;
+}
+
 export function walkProjectFiles(projectRoot: string) {
   const results: string[] = [];
+  const ignoredNames = new Set([
+    ...IGNORE_DIRS,
+    ...readGitignoreNames(projectRoot),
+  ]);
 
   function walk(currentDir: string) {
     const entries = fs.readdirSync(currentDir, {
@@ -109,15 +161,15 @@ export function walkProjectFiles(projectRoot: string) {
     });
 
     for (const entry of entries) {
+      if (ignoredNames.has(entry.name)) {
+        continue;
+      }
+
       const absolutePath = path.join(currentDir, entry.name);
       const relativePath = path.relative(projectRoot, absolutePath);
       const normalizedPath = relativePath.split(path.sep).join('/');
 
       if (entry.isDirectory()) {
-        if (IGNORE_DIRS.has(entry.name)) {
-          continue;
-        }
-
         walk(absolutePath);
         continue;
       }

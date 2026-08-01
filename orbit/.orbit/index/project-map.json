@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-30T08:41:09.835Z",
+  "generatedAt": "2026-08-01T07:17:14.321Z",
   "projectRoot": "/Users/marcolau/Documents/GitHub/Orbit/orbit",
   "framework": "React",
   "packageManager": "npm",
@@ -35,9 +35,9 @@
       "textSignals": []
     },
     {
-      "file": "source/ai_models/aiClient.tsx",
+      "file": "source/ai/client.ts",
       "role": "ai",
-      "extension": ".tsx",
+      "extension": ".ts",
       "featureGuess": "ai",
       "reasons": [
         "ai folder or OpenAI import"
@@ -51,15 +51,15 @@
       "textSignals": []
     },
     {
-      "file": "source/ai_models/prompt.tsx",
-      "role": "component",
-      "extension": ".tsx",
+      "file": "source/ai/prompt.ts",
+      "role": "ai",
+      "extension": ".ts",
       "featureGuess": "ai",
       "reasons": [
-        "tsx/jsx source file"
+        "ai folder or OpenAI import"
       ],
       "imports": [
-        "./aiClient.js"
+        "./client.js"
       ],
       "exports": [
         "askModel"
@@ -82,17 +82,16 @@
         "./projects/search.js",
         "./projects/path.js",
         "ink-select-input",
-        "./init/initMark.js",
+        "./registry/knownProjects.js",
         "./init/init.js",
         "./init/init.js",
         "./commands/context.js",
         "./commands/runCommand.js",
         "./commands/autocomplete.js",
-        "./commands/commands.js",
-        "./projects/readProjectMem.js",
         "./projects/scan.js",
-        "./init/deinit.js",
-        "./projects/checkSum.js"
+        "./registry/knownProjects.js",
+        "./projects/scan.js",
+        "./init/deinit.js"
       ],
       "exports": [
         "App"
@@ -102,7 +101,6 @@
         "(\"\");\n\tconst [isBooting, setIsBooting] = useState",
         "(true);\n\tconst [isThinking, setIsThinking] = useState",
         "(false);\n\tconst [isInitting, setIsInitting] = useState",
-        "(false);\n\tconst [reInit, setReInit] = useState",
         "(false);\n\tconst [project, setProject] = useState",
         "(null);\n\tconst [selectProjectMode, setSelectProjectMode] = useState",
         "(false);\n\tconst [projectOptions, setProjectOptions] = useState",
@@ -117,7 +115,8 @@
         "AI QA agent for E2E testing",
         "Detecting project context...",
         "Project Path:",
-        "Confidence:"
+        "Confidence:",
+        "No project detected"
       ]
     },
     {
@@ -138,9 +137,9 @@
       "textSignals": []
     },
     {
-      "file": "source/commands/autocomplete.tsx",
+      "file": "source/commands/autocomplete.ts",
       "role": "command",
-      "extension": ".tsx",
+      "extension": ".ts",
       "featureGuess": "commands",
       "reasons": [
         "inside commands folder"
@@ -156,25 +155,24 @@
       "textSignals": []
     },
     {
-      "file": "source/commands/commands.tsx",
+      "file": "source/commands/commands.ts",
       "role": "command",
-      "extension": ".tsx",
+      "extension": ".ts",
       "featureGuess": "init",
       "reasons": [
         "contains command metadata"
       ],
       "imports": [
         "./context.js",
-        "../projects/readProjectMem.js",
+        "../registry/knownProjects.js",
         "../projects/search.js",
-        "../ai_models/prompt.js",
+        "../ai/prompt.js",
         "../projects/scan.js",
-        "../projects/scan.js",
-        "../init/deinit.js"
+        "../init/deinit.js",
+        "../projects/scan.js"
       ],
       "exports": [
         "parseCommand",
-        "formatScanResult",
         "OrbitCommand",
         "commands"
       ],
@@ -203,9 +201,9 @@
       ]
     },
     {
-      "file": "source/commands/context.tsx",
+      "file": "source/commands/context.ts",
       "role": "command",
-      "extension": ".tsx",
+      "extension": ".ts",
       "featureGuess": "init",
       "reasons": [
         "inside commands folder"
@@ -225,7 +223,6 @@
         ";\n    setSelectProjectMode: React.Dispatch",
         ";\n    setProjectOptions: React.Dispatch",
         ";\n    setIsInitting: React.Dispatch",
-        ";\n    setReInit: React.Dispatch",
         "ProjectOptions[];\n    setProject: React.Dispatch",
         ";\n    setCheckName: React.Dispatch",
         ";\n    setConfirmName: React.Dispatch",
@@ -233,9 +230,9 @@
       ]
     },
     {
-      "file": "source/commands/runCommand.tsx",
+      "file": "source/commands/runCommand.ts",
       "role": "command",
-      "extension": ".tsx",
+      "extension": ".ts",
       "featureGuess": "commands",
       "reasons": [
         "inside commands folder"
@@ -250,18 +247,17 @@
       "textSignals": []
     },
     {
-      "file": "source/init/deinit.tsx",
-      "role": "component",
-      "extension": ".tsx",
+      "file": "source/init/deinit.ts",
+      "role": "utility",
+      "extension": ".ts",
       "featureGuess": "init",
       "reasons": [
-        "tsx/jsx source file"
+        "generic source file"
       ],
       "imports": [
         "node:fs",
         "../commands/context.js",
-        "../projects/readProjectMem.js",
-        "../init/initMark.js"
+        "../registry/knownProjects.js"
       ],
       "exports": [
         "DeinitResponse",
@@ -273,12 +269,12 @@
       "textSignals": []
     },
     {
-      "file": "source/init/init.tsx",
-      "role": "component",
-      "extension": ".tsx",
+      "file": "source/init/init.ts",
+      "role": "utility",
+      "extension": ".ts",
       "featureGuess": "init",
       "reasons": [
-        "tsx/jsx source file"
+        "generic source file"
       ],
       "imports": [
         "node:fs",
@@ -291,61 +287,38 @@
       "textSignals": []
     },
     {
-      "file": "source/init/initMark.tsx",
-      "role": "component",
-      "extension": ".tsx",
-      "featureGuess": "init",
-      "reasons": [
-        "tsx/jsx source file"
-      ],
-      "imports": [
-        "node:fs",
-        "node:os",
-        "node:path"
-      ],
-      "exports": [
-        "KnownProject",
-        "getOrbitHomeDir",
-        "getProjectsJsonPath",
-        "ensureProjectsJson",
-        "readProjectsJson",
-        "writeProjectsJson",
-        "rememberProject"
-      ],
-      "textSignals": []
-    },
-    {
-      "file": "source/projects/checkSum.tsx",
-      "role": "component",
-      "extension": ".tsx",
+      "file": "source/projects/checksum.ts",
+      "role": "utility",
+      "extension": ".ts",
       "featureGuess": "projects",
       "reasons": [
-        "tsx/jsx source file"
+        "generic source file"
       ],
       "imports": [
         "node:crypto",
         "node:fs",
-        "node:path",
-        "./path.js"
+        "node:path"
       ],
       "exports": [
         "ChecksumsFile",
         "ChecksumDiff",
         "FileChecksumEntry",
+        "checksumFromContent",
         "computeFileChecksum",
         "buildChecksumsFile",
         "compareChecksums",
-        "writeChecksumFile"
+        "readChecksumsFile",
+        "writeChecksumsFile"
       ],
       "textSignals": []
     },
     {
-      "file": "source/projects/path.tsx",
-      "role": "component",
-      "extension": ".tsx",
+      "file": "source/projects/path.ts",
+      "role": "utility",
+      "extension": ".ts",
       "featureGuess": "projects",
       "reasons": [
-        "tsx/jsx source file"
+        "generic source file"
       ],
       "imports": [
         "node:fs",
@@ -360,33 +333,12 @@
       "textSignals": []
     },
     {
-      "file": "source/projects/readProjectMem.tsx",
-      "role": "component",
-      "extension": ".tsx",
-      "featureGuess": "projects",
-      "reasons": [
-        "tsx/jsx source file"
-      ],
-      "imports": [
-        "node:fs",
-        "node:os",
-        "node:path",
-        "../init/initMark.js"
-      ],
-      "exports": [
-        "getGlobalProjectsPath",
-        "readGlobalProjects",
-        "formatProjectsForTui"
-      ],
-      "textSignals": []
-    },
-    {
-      "file": "source/projects/scan.tsx",
-      "role": "component",
-      "extension": ".tsx",
+      "file": "source/projects/scan.ts",
+      "role": "utility",
+      "extension": ".ts",
       "featureGuess": "scan",
       "reasons": [
-        "tsx/jsx source file"
+        "generic source file"
       ],
       "imports": [
         "node:fs",
@@ -400,6 +352,7 @@
         "ProjectRoute",
         "ProjectComponent",
         "ProjectTest",
+        "formatScanResult",
         "scanProject"
       ],
       "textSignals": [
@@ -409,12 +362,12 @@
       ]
     },
     {
-      "file": "source/projects/search.tsx",
-      "role": "component",
-      "extension": ".tsx",
+      "file": "source/projects/search.ts",
+      "role": "utility",
+      "extension": ".ts",
       "featureGuess": "projects",
       "reasons": [
-        "tsx/jsx source file"
+        "generic source file"
       ],
       "imports": [
         "node:fs",
@@ -424,6 +377,28 @@
       "exports": [
         "detectProjectRoot",
         "getProjectDisplayName"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/registry/knownProjects.ts",
+      "role": "utility",
+      "extension": ".ts",
+      "featureGuess": "projects",
+      "reasons": [
+        "generic source file"
+      ],
+      "imports": [
+        "node:fs",
+        "node:os",
+        "node:path"
+      ],
+      "exports": [
+        "KnownProject",
+        "readGlobalProjects",
+        "rememberProject",
+        "removeKnownProject",
+        "formatProjectsForTui"
       ],
       "textSignals": []
     },
@@ -461,51 +436,6 @@
   "routes": [],
   "components": [
     {
-      "name": "prompt",
-      "file": "source/ai_models/prompt.tsx",
-      "featureGuess": "ai"
-    },
-    {
-      "name": "deinit",
-      "file": "source/init/deinit.tsx",
-      "featureGuess": "init"
-    },
-    {
-      "name": "init",
-      "file": "source/init/init.tsx",
-      "featureGuess": "init"
-    },
-    {
-      "name": "initMark",
-      "file": "source/init/initMark.tsx",
-      "featureGuess": "init"
-    },
-    {
-      "name": "checkSum",
-      "file": "source/projects/checkSum.tsx",
-      "featureGuess": "projects"
-    },
-    {
-      "name": "path",
-      "file": "source/projects/path.tsx",
-      "featureGuess": "projects"
-    },
-    {
-      "name": "readProjectMem",
-      "file": "source/projects/readProjectMem.tsx",
-      "featureGuess": "projects"
-    },
-    {
-      "name": "scan",
-      "file": "source/projects/scan.tsx",
-      "featureGuess": "scan"
-    },
-    {
-      "name": "search",
-      "file": "source/projects/search.tsx",
-      "featureGuess": "projects"
-    },
-    {
       "name": "test",
       "file": "test.tsx",
       "featureGuess": null
@@ -514,9 +444,9 @@
   "tests": [],
   "commands": [
     {
-      "file": "source/commands/autocomplete.tsx",
+      "file": "source/commands/autocomplete.ts",
       "role": "command",
-      "extension": ".tsx",
+      "extension": ".ts",
       "featureGuess": "commands",
       "reasons": [
         "inside commands folder"
@@ -532,25 +462,24 @@
       "textSignals": []
     },
     {
-      "file": "source/commands/commands.tsx",
+      "file": "source/commands/commands.ts",
       "role": "command",
-      "extension": ".tsx",
+      "extension": ".ts",
       "featureGuess": "init",
       "reasons": [
         "contains command metadata"
       ],
       "imports": [
         "./context.js",
-        "../projects/readProjectMem.js",
+        "../registry/knownProjects.js",
         "../projects/search.js",
-        "../ai_models/prompt.js",
+        "../ai/prompt.js",
         "../projects/scan.js",
-        "../projects/scan.js",
-        "../init/deinit.js"
+        "../init/deinit.js",
+        "../projects/scan.js"
       ],
       "exports": [
         "parseCommand",
-        "formatScanResult",
         "OrbitCommand",
         "commands"
       ],
@@ -579,9 +508,9 @@
       ]
     },
     {
-      "file": "source/commands/context.tsx",
+      "file": "source/commands/context.ts",
       "role": "command",
-      "extension": ".tsx",
+      "extension": ".ts",
       "featureGuess": "init",
       "reasons": [
         "inside commands folder"
@@ -601,7 +530,6 @@
         ";\n    setSelectProjectMode: React.Dispatch",
         ";\n    setProjectOptions: React.Dispatch",
         ";\n    setIsInitting: React.Dispatch",
-        ";\n    setReInit: React.Dispatch",
         "ProjectOptions[];\n    setProject: React.Dispatch",
         ";\n    setCheckName: React.Dispatch",
         ";\n    setConfirmName: React.Dispatch",
@@ -609,9 +537,9 @@
       ]
     },
     {
-      "file": "source/commands/runCommand.tsx",
+      "file": "source/commands/runCommand.ts",
       "role": "command",
-      "extension": ".tsx",
+      "extension": ".ts",
       "featureGuess": "commands",
       "reasons": [
         "inside commands folder"
@@ -628,9 +556,9 @@
   ],
   "aiFiles": [
     {
-      "file": "source/ai_models/aiClient.tsx",
+      "file": "source/ai/client.ts",
       "role": "ai",
-      "extension": ".tsx",
+      "extension": ".ts",
       "featureGuess": "ai",
       "reasons": [
         "ai folder or OpenAI import"
@@ -642,14 +570,213 @@
         "createOpenAIClient"
       ],
       "textSignals": []
+    },
+    {
+      "file": "source/ai/prompt.ts",
+      "role": "ai",
+      "extension": ".ts",
+      "featureGuess": "ai",
+      "reasons": [
+        "ai folder or OpenAI import"
+      ],
+      "imports": [
+        "./client.js"
+      ],
+      "exports": [
+        "askModel"
+      ],
+      "textSignals": []
     }
   ],
   "projectLogicFiles": [],
   "typeFiles": [],
-  "utilityFiles": [],
+  "utilityFiles": [
+    {
+      "file": "source/init/deinit.ts",
+      "role": "utility",
+      "extension": ".ts",
+      "featureGuess": "init",
+      "reasons": [
+        "generic source file"
+      ],
+      "imports": [
+        "node:fs",
+        "../commands/context.js",
+        "../registry/knownProjects.js"
+      ],
+      "exports": [
+        "DeinitResponse",
+        "DeinitGlobalContextResponse",
+        "getProjectPath",
+        "deinitLocalContext",
+        "deinitGlobalContext"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/init/init.ts",
+      "role": "utility",
+      "extension": ".ts",
+      "featureGuess": "init",
+      "reasons": [
+        "generic source file"
+      ],
+      "imports": [
+        "node:fs",
+        "node:path"
+      ],
+      "exports": [
+        "InitFileAction",
+        "initOrbitProject"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/projects/checksum.ts",
+      "role": "utility",
+      "extension": ".ts",
+      "featureGuess": "projects",
+      "reasons": [
+        "generic source file"
+      ],
+      "imports": [
+        "node:crypto",
+        "node:fs",
+        "node:path"
+      ],
+      "exports": [
+        "ChecksumsFile",
+        "ChecksumDiff",
+        "FileChecksumEntry",
+        "checksumFromContent",
+        "computeFileChecksum",
+        "buildChecksumsFile",
+        "compareChecksums",
+        "readChecksumsFile",
+        "writeChecksumsFile"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/projects/path.ts",
+      "role": "utility",
+      "extension": ".ts",
+      "featureGuess": "projects",
+      "reasons": [
+        "generic source file"
+      ],
+      "imports": [
+        "node:fs",
+        "node:os",
+        "node:path"
+      ],
+      "exports": [
+        "resolveUserPath",
+        "validateProjectPath",
+        "walkProjectFiles"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/projects/scan.ts",
+      "role": "utility",
+      "extension": ".ts",
+      "featureGuess": "scan",
+      "reasons": [
+        "generic source file"
+      ],
+      "imports": [
+        "node:fs",
+        "node:path",
+        "./path.js"
+      ],
+      "exports": [
+        "ProjectMap",
+        "SourceFileRole",
+        "ScannedFile",
+        "ProjectRoute",
+        "ProjectComponent",
+        "ProjectTest",
+        "formatScanResult",
+        "scanProject"
+      ],
+      "textSignals": [
+        ";\n  dependencies?: Record",
+        ";\n  devDependencies?: Record",
+        "([^"
+      ]
+    },
+    {
+      "file": "source/projects/search.ts",
+      "role": "utility",
+      "extension": ".ts",
+      "featureGuess": "projects",
+      "reasons": [
+        "generic source file"
+      ],
+      "imports": [
+        "node:fs",
+        "node:path",
+        "node:os"
+      ],
+      "exports": [
+        "detectProjectRoot",
+        "getProjectDisplayName"
+      ],
+      "textSignals": []
+    },
+    {
+      "file": "source/registry/knownProjects.ts",
+      "role": "utility",
+      "extension": ".ts",
+      "featureGuess": "projects",
+      "reasons": [
+        "generic source file"
+      ],
+      "imports": [
+        "node:fs",
+        "node:os",
+        "node:path"
+      ],
+      "exports": [
+        "KnownProject",
+        "readGlobalProjects",
+        "rememberProject",
+        "removeKnownProject",
+        "formatProjectsForTui"
+      ],
+      "textSignals": []
+    }
+  ],
   "configs": [
     "package.json",
     "tsconfig.json"
   ],
-  "filesScanned": 20
+  "filesScanned": 19,
+  "checksumDiff": {
+    "added": [
+      "package.json",
+      "readme.md",
+      "source/ai/client.ts",
+      "source/ai/prompt.ts",
+      "source/app.tsx",
+      "source/cli.tsx",
+      "source/commands/autocomplete.ts",
+      "source/commands/commands.ts",
+      "source/commands/context.ts",
+      "source/commands/runCommand.ts",
+      "source/init/deinit.ts",
+      "source/init/init.ts",
+      "source/projects/checksum.ts",
+      "source/projects/path.ts",
+      "source/projects/scan.ts",
+      "source/projects/search.ts",
+      "source/registry/knownProjects.ts",
+      "test.tsx",
+      "tsconfig.json"
+    ],
+    "changed": [],
+    "unchanged": [],
+    "deleted": []
+  }
 }

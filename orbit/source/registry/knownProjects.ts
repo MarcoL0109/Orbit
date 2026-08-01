@@ -20,33 +20,17 @@ type ProjectsFile = {
   projects: KnownProject[];
 };
 
-export function getOrbitHomeDir() {
-  return path.join(os.homedir(), '.orbit');
+function getGlobalProjectsPath() {
+  return path.join(os.homedir(), '.orbit', 'projects.json');
 }
 
-export function getProjectsJsonPath() {
-  return path.join(getOrbitHomeDir(), 'projects.json');
-}
-
-export function ensureProjectsJson() {
-  const orbitHome = getOrbitHomeDir();
-  const projectsPath = getProjectsJsonPath();
-
-  fs.mkdirSync(orbitHome, {recursive: true});
+export function readGlobalProjects(): ProjectsFile {
+  const projectsPath = getGlobalProjectsPath();
 
   if (!fs.existsSync(projectsPath)) {
-    fs.writeFileSync(
-      projectsPath,
-      JSON.stringify({projects: []}, null, 2),
-      'utf8',
-    );
+    return {projects: []};
   }
 
-  return projectsPath;
-}
-
-export function readProjectsJson(): ProjectsFile {
-  const projectsPath = ensureProjectsJson();
   const raw = fs.readFileSync(projectsPath, 'utf8');
 
   if (!raw.trim()) {
@@ -60,12 +44,12 @@ export function readProjectsJson(): ProjectsFile {
   }
 }
 
-export function writeProjectsJson(data: ProjectsFile) {
-  const projectsPath = ensureProjectsJson();
+function writeGlobalProjects(data: ProjectsFile) {
+  const projectsPath = getGlobalProjectsPath();
 
+  fs.mkdirSync(path.dirname(projectsPath), {recursive: true});
   fs.writeFileSync(projectsPath, JSON.stringify(data, null, 2), 'utf8');
 }
-
 
 export function rememberProject(project: {
   name: string;
@@ -78,7 +62,7 @@ export function rememberProject(project: {
   lastScannedAt?: string | null;
 }) {
   const now = new Date().toISOString();
-  const data = readProjectsJson();
+  const data = readGlobalProjects();
 
   const existing = data.projects.find((item) => item.path === project.path);
 
@@ -112,5 +96,40 @@ export function rememberProject(project: {
     });
   }
 
-  writeProjectsJson(data);
+  writeGlobalProjects(data);
+}
+
+export function removeKnownProject(projectPath: string): boolean {
+  const data = readGlobalProjects();
+  const beforeCount = data.projects.length;
+  const updatedProjects = data.projects.filter(
+    (project) => project.path !== projectPath,
+  );
+
+  if (updatedProjects.length === beforeCount) {
+    return false;
+  }
+
+  writeGlobalProjects({projects: updatedProjects});
+  return true;
+}
+
+export function formatProjectsForTui(projectsFile: ProjectsFile) {
+  const {projects} = projectsFile;
+  if (projects.length === 0) {
+    return `No projects remembered yet.
+Run /init inside a project to add it to Orbit.`;
+  }
+  return `
+Tracked projects:
+${projects
+.map((project, index) => {
+return `${index + 1}. ${project.name}
+Path: ${project.path}
+Framework: ${project.framework ?? 'Unknown'}
+Package manager: ${project.packageManager ?? 'Unknown'}
+Test framework: ${project.testFramework ?? 'Unknown'}
+Open count: ${project.openCount ?? 0}`;
+    })
+    .join('\n\n')}`;
 }

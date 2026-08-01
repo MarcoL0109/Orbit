@@ -1,69 +1,11 @@
 import type { CommandContext } from "./context.js";
-import {readGlobalProjects, formatProjectsForTui} from '../projects/readProjectMem.js';
+import {readGlobalProjects, formatProjectsForTui} from '../registry/knownProjects.js';
 import { getProjectDisplayName } from "../projects/search.js";
-import { askModel } from '../ai_models/prompt.js';
+import { askModel } from '../ai/prompt.js';
 import {scanProject, writeProjectMap} from '../projects/scan.js';
 import { getProjectPath } from '../init/deinit.js';
 import { formatScanResult } from "../projects/scan.js";
-
-
-// I need some sort of checking whether the number of parameter passed to the command is correct or not
-
-export function parseCommand(input: string) {
-    const trimmed = input.trim();
-
-    if (!trimmed.startsWith('/')) {
-        return null;
-    }
-
-    const [rawCommand, ...args] = trimmed.slice(1).split(/\s+/);
-    if (rawCommand) {
-        const commandName = rawCommand.toLowerCase();
-        const command = commands.find(
-            (cmd) =>
-                cmd.name === commandName ||
-                cmd.aliases?.includes(commandName),
-        );
-        return {
-            command,
-            commandName,
-            args,
-            raw: trimmed,
-        };
-    }
-    return null;
-}
-
-
-function checkAbortable(context: CommandContext): boolean {
-    if (context.isThinking) {
-        context.setMessages((prev) => [
-            ...prev,
-            {
-                role: 'agent',
-                content: "There is ongoing task Orbit is handling. You can use the /abort command to terminate previous task",
-                color: "red"
-            },
-        ]);
-        return true;
-    }
-    return false;
-}
-
-function checkParamsNums(argNumsExpected: number, argNumsGiven: number, context: CommandContext): boolean {
-    if (argNumsGiven !== argNumsExpected) {
-        context.setMessages((prev) => [
-            ...prev,
-            {
-                role: 'system',
-                content: `This command takes ${argNumsExpected} arg(s), ${argNumsGiven} are given`,
-                color: 'red',
-            },
-        ]);
-        return true;
-    }
-    return false;
-}
+import { reportError, type ArgCountRule } from './error.js';
 
 
 export type OrbitCommand = {
@@ -71,7 +13,10 @@ export type OrbitCommand = {
     aliases?: string[];
     description: string;
     usage: string;
-    args_nums: number;
+    argsRule: ArgCountRule;
+    // Commands the user must always be able to run, even while another
+    // command is mid-flight — currently only /abort.
+    bypassBusyCheck?: boolean;
     handler: (args: string[], context: CommandContext) => Promise<void> | void;
 };
 
@@ -82,10 +27,8 @@ export const commands: OrbitCommand[] = [
         aliases: ['h'],
         description: 'Show available Orbit commands',
         usage: '/help',
-        args_nums: 0,
+        argsRule: {exact: 0},
         handler: async (_args, context) => {
-            const stop = checkParamsNums(0, _args.length, context);
-            if (stop) return;
             context.setMessages((prev) => [
                 ...prev,
                 {
@@ -111,36 +54,18 @@ Available Orbit commands:
         name: 'init',
         description: 'Create .orbit project context',
         usage: '/init',
-        args_nums: 0,
+        argsRule: {exact: 0},
         handler: async (_args, context) => {
-            const stop = checkParamsNums(0, _args.length, context);
-            if (stop) return;
             if (!context.project) {
-                context.setMessages((prev) => [
-                    ...prev,
-                    {
-                        role: 'system',
-                        content: 'No valid project selected. Please select or open a project first.',
-                        color: 'red',
-                    },
-                ]);
+                reportError(context.setMessages, {kind: 'no-project-selected'});
                 return;
             }
-
-            checkAbortable(context);
 
             if (context.project.hasOrbitFolder) {
-                context.setMessages((prev) => [
-                    ...prev,
-                    {
-                        role: 'system',
-                        content: 'Orbit context is already initialized. You can use /scan to refresh the context, or delete the .orbit folder and run /init again.',
-                        color: 'yellow',
-                    },
-                ]);
+                reportError(context.setMessages, {kind: 'project-already-initialized'});
                 return;
             }
-            context.setIsInitting(true);
+
             let projectName = 'Default'
             if (context.project.root) {
                 projectName = getProjectDisplayName(context.project.root);
@@ -154,11 +79,8 @@ Available Orbit commands:
         name: 'projects',
         description: 'Show tracked projects',
         usage: '/projects',
-        args_nums: 0,
+        argsRule: {exact: 0},
         handler: async (_args, context) => {
-            const stop = checkParamsNums(0, _args.length, context);
-            if (stop) return;
-            checkAbortable(context);
             try {
                 const projectsFile = readGlobalProjects();
                 const content = formatProjectsForTui(projectsFile);
@@ -170,17 +92,12 @@ Available Orbit commands:
                         content,
                     },
                 ]);
-                } 
-            catch (error) {
-                context.setMessages((prev) => [
-                    ...prev,
-                    {
-                    role: 'system',
-                    content: `Could not read projects.json: ${
-                        error instanceof Error ? error.message : String(error)
-                    }`,
-                    },
-                ]);
+            } catch (error) {
+                reportError(context.setMessages, {
+                    kind: 'unexpected',
+                    action: 'Reading projects.json',
+                    cause: error,
+                });
             }
         },
     },
@@ -189,10 +106,8 @@ Available Orbit commands:
         name: 'exit',
         description: 'Exit Orbit',
         usage: '/exit',
-        args_nums: 0,
-        handler: (_args, context) => {
-            const stop = checkParamsNums(0, _args.length, context);
-            if (stop) return;
+        argsRule: {exact: 0},
+        handler: (_args, _context) => {
             process.exit(0);
         },
     },
@@ -201,10 +116,8 @@ Available Orbit commands:
         name: 'clear',
         description: 'Clear Orbit terminal screen',
         usage: '/clear',
-        args_nums: 0,
+        argsRule: {exact: 0},
         handler: (_args, context) => {
-            const stop = checkParamsNums(0, _args.length, context);
-            if (stop) return;
             context.setMessages([]);
         }
     },
@@ -213,11 +126,8 @@ Available Orbit commands:
         name: "switch",
         description: "Switch Orbit to work on a different project",
         usage: '/switch',
-        args_nums: 1,
+        argsRule: {exact: 0},
         handler: (_args, context) => {
-            checkAbortable(context);
-            const stop = checkParamsNums(1, _args.length, context);
-            if (stop) return;
             context.setSelectProjectMode(true);
             const options = context.constructProjectOptions();
             context.setProjectOptions(options);
@@ -229,21 +139,9 @@ Available Orbit commands:
         name: "ai",
         description: "Just a mock testing to see whether the model is working in Orbit",
         usage: '/ai <prompt>',
-        args_nums: 1,
+        argsRule: {min: 1},
         handler: async (_args, context) => {
-            checkAbortable(context);
             const prompt = _args.join(' ').trim();
-            if (!prompt) {
-                context.setMessages((prev) => [
-                    ...prev,
-                    {
-                        role: 'agent',
-                        content: 'Usage: /ai <prompt>',
-                        color: 'yellow',
-                    },
-                ]);
-                return;
-            }
 
             try {
                 context.setIsThinking(true);
@@ -263,16 +161,11 @@ Available Orbit commands:
                     },
                 ]);
             } catch (error) {
-                context.setMessages((prev) => [
-                    ...prev,
-                    {
-                        role: 'system',
-                        content: `AI request failed: ${
-                        error instanceof Error ? error.message : String(error)
-                    }`,
-                    color: 'red',
-                    },
-                ]);
+                reportError(context.setMessages, {
+                    kind: 'unexpected',
+                    action: 'AI request',
+                    cause: error,
+                });
             } finally {
                 context.setIsThinking(false);
                 context.clearAbortableTask();
@@ -283,11 +176,10 @@ Available Orbit commands:
     {
         name: "abort",
         description: "Aborting on going tasks",
-        usage: "abort",
-        args_nums: 0,
+        usage: "/abort",
+        argsRule: {exact: 0},
+        bypassBusyCheck: true,
         handler: (_args, context) => {
-            const stop = checkParamsNums(0, _args.length, context);
-            if (stop) return;
             const didAbort = context.abortCurrentTask();
             context.setMessages((prev) => [
                 ...prev,
@@ -305,20 +197,10 @@ Available Orbit commands:
         name: 'scan',
         description: 'Scan the current project',
         usage: '/scan',
-        args_nums: 0,
+        argsRule: {exact: 0},
         handler: async (_args, context) => {
-            const stop = checkParamsNums(0, _args.length, context);
-            if (stop) return;
-            checkAbortable(context);
             if (!context.project?.root) {
-                context.setMessages((prev) => [
-                ...prev,
-                {
-                    role: 'system',
-                    content: 'No project selected.',
-                    color: 'red',
-                },
-                ]);
+                reportError(context.setMessages, {kind: 'no-project-selected'});
                 return;
             }
             try {
@@ -336,16 +218,11 @@ Available Orbit commands:
                 },
                 ]);
             } catch (error) {
-                context.setMessages((prev) => [
-                    ...prev,
-                    {
-                        role: 'system',
-                        content: `Project scan failed: ${
-                        error instanceof Error ? error.message : String(error)
-                        }`,
-                        color: 'red',
-                    },
-                ]);
+                reportError(context.setMessages, {
+                    kind: 'unexpected',
+                    action: 'Project scan',
+                    cause: error,
+                });
             } finally {
                 context.setIsThinking(false);
             }
@@ -357,20 +234,11 @@ Available Orbit commands:
         name: 'deinit',
         description: 'This command delete .orbit context for a particular project',
         usage: '/deinit',
-        args_nums: 0,
+        argsRule: {exact: 0},
         handler: (_args, context) => {
-            const stop = checkParamsNums(0, _args.length, context);
-            if (stop) return;
             const projectPath = getProjectPath(context.project);
             if (!projectPath.ok) {
-                context.setMessages((prev) => [
-                    ...prev,
-                    {
-                        role: 'system',
-                        content: projectPath.context,
-                        color: 'red',
-                    },
-                ]);
+                reportError(context.setMessages, {kind: 'no-project-selected'});
                 return;
             }
             context.setConfirmDeinit(true);

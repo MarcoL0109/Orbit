@@ -1,5 +1,3 @@
-// src/commands/autocomplete.ts
-
 import { commands } from './commands.js';
 
 export function getCommandSuggestions(input: string) {

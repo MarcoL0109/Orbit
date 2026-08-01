@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import type { ProjectInfo } from '../commands/context.js';
-import { readGlobalProjects } from '../projects/readProjectMem.js';
-import { writeProjectsJson } from '../init/initMark.js';
+import { removeKnownProject } from '../registry/knownProjects.js';
 
 
 
@@ -37,22 +36,14 @@ export function deinitLocalContext(path: string) {
 
 
 export function deinitGlobalContext(projectRoot: string): DeinitGlobalContextResponse {
-    const globalProjectJSON = readGlobalProjects();
-    const beforeCount = globalProjectJSON.projects.length;
-    const updatedProjects = globalProjectJSON.projects.filter(
-        (project) => project.path !== projectRoot,
-    );
+    const removed = removeKnownProject(projectRoot);
 
-    if (updatedProjects.length === beforeCount) {
+    if (!removed) {
         return {
             ok: false,
             context: `Project was not found in global Orbit memory: ${projectRoot}`,
         };
     }
-
-    writeProjectsJson({
-        projects: updatedProjects,
-    });
 
     return {
         ok: true,

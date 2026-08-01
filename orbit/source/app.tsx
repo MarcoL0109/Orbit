@@ -5,17 +5,17 @@ import Spinner from 'ink-spinner';
 import { detectProjectRoot } from './projects/search.js';
 import { validateProjectPath } from './projects/path.js';
 import SelectInput from 'ink-select-input';
-import { rememberProject } from "./init/initMark.js";
+import { rememberProject } from "./registry/knownProjects.js";
 import { initOrbitProject } from "./init/init.js";
 import type { InitFileAction } from './init/init.js';
 import type { Message, ProjectOptions, ProjectInfo } from './commands/context.js'
 import { runCommand } from './commands/runCommand.js';
 import { getBestCommandCompletion, getGhostCompletion } from './commands/autocomplete.js';
 import { formatScanResult } from './projects/scan.js';
-import { readGlobalProjects } from './projects/readProjectMem.js';
+import { readGlobalProjects } from './registry/knownProjects.js';
 import { scanProject, writeProjectMap } from './projects/scan.js';
 import { deinitLocalContext, getProjectPath, deinitGlobalContext } from './init/deinit.js';
-import { writeChecksumFile } from './projects/checkSum.js';
+import { reportError } from './commands/error.js';
 
 
 
@@ -30,7 +30,6 @@ export function App({ initialPrompt }: AppProps) {
 	const [isBooting, setIsBooting] = useState<boolean>(true);
 	const [isThinking, setIsThinking] = useState<boolean>(false);
 	const [isInitting, setIsInitting] = useState<boolean>(false);
-	const [reInit, setReInit] = useState<boolean>(false);
 	const [project, setProject] = useState<ProjectInfo | null>(null);
 	const [selectProjectMode, setSelectProjectMode] = useState<boolean>(false);
 	const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
@@ -183,7 +182,6 @@ ${skippedText}
 			setSelectProjectMode,
 			setProjectOptions,
 			setIsInitting,
-			setReInit,
 			project,
 			isThinking,
 			constructProjectOptions,
@@ -275,76 +273,77 @@ ${skippedText}
 
 
 	const handleConfirmNameInit = async () => {
-		if (project) {
+		if (!project) return;
+
+		setIsInitting(true);
+
+		let initSucceeded = false;
+
+		try {
+			const result = initOrbitProject({
+				projectName: confirmName,
+				projectRoot: project.root || '',
+				framework: project.framework,
+				packageManager: project.packageManager,
+				testFramework: project.testFramework,
+			});
+
+			rememberProject({
+				name: confirmName,
+				path: project.root || '',
+				framework: project.framework ?? null,
+				packageManager: project.packageManager ?? null,
+				testFramework: project.testFramework ?? null,
+				lastScannedAt: null,
+			});
+
+			setMessages((prev) => [
+				...prev,
+				{
+					role: 'agent',
+					content: `${formatInitResult(result.files)}
+Global memory updated:
+✓ ~/.orbit/projects.json`,
+					color: 'green',
+				},
+			]);
+
+			setProject?.((prev) =>
+				prev
+					? {
+						...prev,
+						hasOrbitFolder: true,
+					}
+					: prev,
+			);
+			initSucceeded = true;
+		} catch (error) {
+			reportError(setMessages, {kind: 'unexpected', action: 'Initializing Orbit context', cause: error});
+		}
+
+		// Kept as its own try/catch: init already succeeded and .orbit already
+		// exists at this point, so a scan failure here is a different problem
+		// from an init failure and should be reported as such.
+		if (initSucceeded && project.root) {
 			try {
-				const result = initOrbitProject({
-					projectName: confirmName,
-					projectRoot: project.root || '',
-					framework: project.framework,
-					packageManager: project.packageManager,
-					testFramework: project.testFramework,
-				});
-			
-				rememberProject({
-					name: confirmName,
-					path: project.root || '',
-					framework: project.framework ?? null,
-					packageManager: project.packageManager ?? null,
-					testFramework: project.testFramework ?? null,
-					lastScannedAt: null,
-				});
-			
+				const projectMap = await scanProject(project.root);
+				const projectMapPath = writeProjectMap(project.root, projectMap);
 				setMessages((prev) => [
 					...prev,
 					{
 						role: 'agent',
-						content: `${formatInitResult(result.files)}
-Global memory updated:
-✓ ~/.orbit/projects.json`,
+						content: formatScanResult(projectMap, projectMapPath),
 						color: 'green',
 					},
 				]);
-			
-				setProject?.((prev) =>
-					prev
-						? {
-							...prev,
-							hasOrbitFolder: true,
-						}
-						: prev,
-				);
-				// Fused the scan project in the init as well.
-				if (project.root) {
-					const projectMap = await scanProject(project.root);
-					const projectMapPath = writeProjectMap(project.root, projectMap);
-					writeChecksumFile(project.root);
-					setMessages((prev) => [
-						...prev,
-						{
-							role: 'agent',
-							content: formatScanResult(projectMap, projectMapPath),
-							color: 'green',
-						},
-					]);
-				}
-			}
-			catch (error) {
-				setMessages((prev) => [
-					...prev,
-					{
-						role: 'system',
-						content: `Failed to initialize Orbit context: ${
-							error instanceof Error ? error.message : String(error)
-						}`,
-						color: 'red',
-					},
-				]);
-			} finally {
-				setIsInitting(false);
-				setCheckName(false);
-				setConfirmName("");
+			} catch (error) {
+				reportError(setMessages, {kind: 'post-init-scan-failed', cause: error});
 			}
 		}
+
+		setIsInitting(false);
+		setCheckName(false);
+		setConfirmName("");
 	}
 
 
@@ -353,11 +352,15 @@ Global memory updated:
 			setIsThinking(true);
 			if (project) {
 				const projectPath = getProjectPath(project);
+				if (!projectPath.ok) {
+					reportError(setMessages, {kind: 'no-project-selected'});
+					setIsThinking(false);
+					setConfirmDeinit(false);
+					return;
+				}
 				const path = projectPath.route;
 				deinitLocalContext(path);
-				if (project) {
-					project.hasOrbitFolder = false;
-				}
+				project.hasOrbitFolder = false;
 				setMessages((prev) => [
 					...prev,
 					{
@@ -457,7 +460,7 @@ Global memory updated:
 			))}
 		</Box>
 
-		{isBooting || selectProjectMode || reInit || confirmDeinit ? (
+		{isBooting || selectProjectMode || confirmDeinit || checkName || isInitting ? (
 			<Box marginTop={1}>
 				<Text color="yellow">
 					<Spinner type="dots" /> Selection Menu In Progress...

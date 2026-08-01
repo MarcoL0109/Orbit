@@ -1,127 +1,121 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-30T08:41:09.839Z",
+  "generatedAt": "2026-08-01T07:17:14.319Z",
   "algorithm": "sha256",
   "files": {
     "package.json": {
       "checksum": "e7c0c0a53f30a16ab04dadeacececda01425e89eb2e2bc3580b3819cd7d8afda",
       "sizeBytes": 1485,
       "modifiedAt": "2026-07-20T08:01:42.397Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+      "scannedAt": "2026-08-01T07:17:14.310Z"
     },
     "readme.md": {
       "checksum": "ee9173692549976d2776e56faf7fc2e0e10cd7b15dcb8ac2a8bfb8bb541885c9",
       "sizeBytes": 310,
       "modifiedAt": "2026-07-20T08:01:42.398Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+      "scannedAt": "2026-08-01T07:17:14.311Z"
     },
-    "source/ai_models/aiClient.tsx": {
+    "source/ai/client.ts": {
       "checksum": "afcae72f84bcf1d960aa5623dbb00a33aeb9cc6b5e4d717e8f223c992af41f6b",
       "sizeBytes": 295,
-      "modifiedAt": "2026-07-20T08:01:42.399Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+      "modifiedAt": "2026-08-01T06:57:31.180Z",
+      "scannedAt": "2026-08-01T07:17:14.312Z"
     },
-    "source/ai_models/prompt.tsx": {
-      "checksum": "92729b44aa00379468485860acff4653ffd5827b79b0d18e594047ed041029fb",
-      "sizeBytes": 1303,
-      "modifiedAt": "2026-07-20T08:01:42.400Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+    "source/ai/prompt.ts": {
+      "checksum": "4077918ccc003ec3c497028e5f3f8eee53f5f28cb49767d731468a30852f8925",
+      "sizeBytes": 1301,
+      "modifiedAt": "2026-08-01T06:57:31.181Z",
+      "scannedAt": "2026-08-01T07:17:14.313Z"
     },
     "source/app.tsx": {
-      "checksum": "148cfbe1a2b5e6ec8838c9bf6621d462bbe1cbcaf24a79ad73c549e446cda886",
-      "sizeBytes": 13134,
-      "modifiedAt": "2026-07-30T08:38:09.240Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+      "checksum": "8a1a75933092128ce83fb0cc7890cc59f8952466ca7d96ad0c4d0e608e6af67d",
+      "sizeBytes": 13436,
+      "modifiedAt": "2026-08-01T07:10:49.231Z",
+      "scannedAt": "2026-08-01T07:17:14.313Z"
     },
     "source/cli.tsx": {
       "checksum": "e19290309af3ed49bc95c2984dfa90cf2f6e02d3f7a8f2ff1a63c17cc02a2978",
       "sizeBytes": 878,
       "modifiedAt": "2026-07-20T08:01:42.401Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+      "scannedAt": "2026-08-01T07:17:14.315Z"
     },
-    "source/commands/autocomplete.tsx": {
-      "checksum": "d8a5d1dc5414214fa44fc09b24f02c891eb3b8f15d9b8eced1fef6b67fa87577",
-      "sizeBytes": 1108,
-      "modifiedAt": "2026-07-20T08:01:42.402Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+    "source/commands/autocomplete.ts": {
+      "checksum": "7252a495212927cdde2522d4b7ad86c27b8d554b2de00da4b6e05f2157c438eb",
+      "sizeBytes": 1075,
+      "modifiedAt": "2026-08-01T06:57:31.182Z",
+      "scannedAt": "2026-08-01T07:17:14.315Z"
     },
-    "source/commands/commands.tsx": {
-      "checksum": "b93e8a375cef25d6dc26b4506099fa48cafb27a6e42f39b5ff57318dcfadbc00",
-      "sizeBytes": 12582,
-      "modifiedAt": "2026-07-24T08:04:16.712Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+    "source/commands/commands.ts": {
+      "checksum": "672ab41f61677b9add91bf9f8ca2320a09d2586be35b08ba70ed81fa135a10e9",
+      "sizeBytes": 12280,
+      "modifiedAt": "2026-08-01T07:10:29.915Z",
+      "scannedAt": "2026-08-01T07:17:14.315Z"
     },
-    "source/commands/context.tsx": {
-      "checksum": "70d8253e02728c5ae6533c89987d352a5be63022da01fcbaef4acf4628537cb4",
-      "sizeBytes": 1478,
-      "modifiedAt": "2026-07-21T07:46:48.783Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+    "source/commands/context.ts": {
+      "checksum": "3c23abc14c960338e8fa9f57e1e151455ab67900c535d6a6fb695415f0bcdb2d",
+      "sizeBytes": 1390,
+      "modifiedAt": "2026-08-01T07:10:53.157Z",
+      "scannedAt": "2026-08-01T07:17:14.316Z"
     },
-    "source/commands/runCommand.tsx": {
-      "checksum": "584c82f14446c5b4e9068c8f393f81d331a16579947e5c861a325dcbc5b49ba8",
-      "sizeBytes": 815,
-      "modifiedAt": "2026-07-23T13:28:33.962Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+    "source/commands/runCommand.ts": {
+      "checksum": "6c8175e561a51fff84c4aa56d855049b697d52146f44b6ee8e458fc4da4383a1",
+      "sizeBytes": 783,
+      "modifiedAt": "2026-08-01T06:57:31.184Z",
+      "scannedAt": "2026-08-01T07:17:14.316Z"
     },
-    "source/init/deinit.tsx": {
-      "checksum": "f19aa68301a03239d9eaa4bc6c8ed96ec94195fe4578e2ab63ee1f23750ad1bf",
-      "sizeBytes": 1566,
-      "modifiedAt": "2026-07-22T08:17:37.246Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+    "source/init/deinit.ts": {
+      "checksum": "d441bbbd65b56bd897e698ea10f6e385e42bff4683a2fe2172c13763bd45b95d",
+      "sizeBytes": 1231,
+      "modifiedAt": "2026-08-01T06:57:31.184Z",
+      "scannedAt": "2026-08-01T07:17:14.317Z"
     },
-    "source/init/init.tsx": {
-      "checksum": "98f634371e34a653b15d44757ee445c4639daa9dff045e3bb1bda3885896c4a6",
-      "sizeBytes": 4027,
-      "modifiedAt": "2026-07-23T13:26:11.476Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+    "source/init/init.ts": {
+      "checksum": "9d97c7ffccf45208e647e945858baafc3ef9c49eee874aae036201a52272b3b9",
+      "sizeBytes": 3671,
+      "modifiedAt": "2026-08-01T06:57:31.185Z",
+      "scannedAt": "2026-08-01T07:17:14.317Z"
     },
-    "source/init/initMark.tsx": {
-      "checksum": "6992e42626cc9406a0fdd36edfa01bfa77970111849cdb1c53a6ee1d8c917aec",
-      "sizeBytes": 3065,
-      "modifiedAt": "2026-07-20T08:01:42.406Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+    "source/projects/checksum.ts": {
+      "checksum": "98005cc9bb36a45cf0a1766063c1d1f0a3ee7b1a37fa70ca52ae493345f9bec1",
+      "sizeBytes": 2976,
+      "modifiedAt": "2026-08-01T07:09:10.589Z",
+      "scannedAt": "2026-08-01T07:17:14.317Z"
     },
-    "source/projects/checkSum.tsx": {
-      "checksum": "9ff351846243d533650b2843a2248ce35e0cd21953194ae6dc2d1f580b7cbaa7",
-      "sizeBytes": 3033,
-      "modifiedAt": "2026-07-29T14:28:45.706Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+    "source/projects/path.ts": {
+      "checksum": "c70f1a67196b67626e1fff503ddb0b547b29c6375f4d60f5eeecb0f11828fa39",
+      "sizeBytes": 3997,
+      "modifiedAt": "2026-08-01T07:10:17.611Z",
+      "scannedAt": "2026-08-01T07:17:14.318Z"
     },
-    "source/projects/path.tsx": {
-      "checksum": "e77892b09e4716051b631f1f2a076ff2fb8fb8ca1dd1c46911878070dea751d9",
-      "sizeBytes": 2958,
-      "modifiedAt": "2026-07-29T12:29:34.227Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+    "source/projects/scan.ts": {
+      "checksum": "b783d5f830f33cd06672332c87a7852fcf2fe07638a0b05e04962574ea7184d1",
+      "sizeBytes": 19370,
+      "modifiedAt": "2026-08-01T07:10:05.309Z",
+      "scannedAt": "2026-08-01T07:17:14.318Z"
     },
-    "source/projects/readProjectMem.tsx": {
-      "checksum": "a18ba3b83ddba63fcc32d14a10cbec76751825d00faffeb5cf743e09035cdc0b",
-      "sizeBytes": 1238,
-      "modifiedAt": "2026-07-22T08:17:34.708Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
-    },
-    "source/projects/scan.tsx": {
-      "checksum": "8707196c35acfb3e914363e275952a66a2dec720a79445c23fcbcbcf5c8c1fc6",
-      "sizeBytes": 13986,
-      "modifiedAt": "2026-07-29T14:23:54.978Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
-    },
-    "source/projects/search.tsx": {
+    "source/projects/search.ts": {
       "checksum": "fbceceaa46821df812c45906d9a35bef658091b54703d039df11d69c8714e3ce",
       "sizeBytes": 4174,
-      "modifiedAt": "2026-07-20T08:01:42.410Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+      "modifiedAt": "2026-08-01T06:57:31.186Z",
+      "scannedAt": "2026-08-01T07:17:14.318Z"
+    },
+    "source/registry/knownProjects.ts": {
+      "checksum": "060c40480d2b2bc7f1a245b13f2f1308e3591078b2a315736905b999ac1f9459",
+      "sizeBytes": 3741,
+      "modifiedAt": "2026-08-01T06:54:51.653Z",
+      "scannedAt": "2026-08-01T07:17:14.319Z"
     },
     "test.tsx": {
       "checksum": "5118e745644286b819d466bdf451fcfd772c0f662c12e17ca742f4b7e997e9dd",
       "sizeBytes": 456,
       "modifiedAt": "2026-07-20T08:01:42.411Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+      "scannedAt": "2026-08-01T07:17:14.319Z"
     },
     "tsconfig.json": {
       "checksum": "07644cf7fa6dad1d5a4cea28fc0e9044d68e1a0452701e505f13fd525775f139",
       "sizeBytes": 109,
       "modifiedAt": "2026-07-20T08:10:30.039Z",
-      "scannedAt": "2026-07-30T08:41:09.839Z"
+      "scannedAt": "2026-08-01T07:17:14.319Z"
     }
   }
 }

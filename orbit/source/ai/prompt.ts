@@ -1,4 +1,4 @@
-import {createOpenAIClient} from './aiClient.js';
+import {createOpenAIClient} from './client.js';
 
 
 type AskModelOptions = {

@@ -1,5 +1,3 @@
-// src/commands/types.ts
-
 import type React from 'react';
 
 export type Message = {
@@ -33,7 +31,6 @@ export type CommandContext = {
     setSelectProjectMode: React.Dispatch<React.SetStateAction<boolean>>;
     setProjectOptions: React.Dispatch<React.SetStateAction<ProjectOptions[]>>;
     setIsInitting: React.Dispatch<React.SetStateAction<boolean>>;
-    setReInit: React.Dispatch<React.SetStateAction<boolean>>;
     project: ProjectInfo | null;
     isThinking: boolean;
     constructProjectOptions: () => ProjectOptions[];
