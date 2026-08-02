@@ -1,17 +1,14 @@
-import type { Response, ResponseCreateParamsNonStreaming, ResponseFunctionToolCall, ResponseInputItem } from 'openai/resources/responses/responses';
-import { createOpenAIClient } from './client.js';
+import type { Response, ResponseFunctionToolCall, ResponseInputItem } from 'openai/resources/responses/responses';
+import { createOpenAIClient, type ResponsesClient } from './client.js';
 import { toolRegistry, findTool, toApiToolSchema, type ToolContext, type ToolResult } from './tools/index.js';
 import type { ReportResultArgs, FeatureResult } from './tools/reportResult.js';
 import type { RunTestResult } from './tools/runTest.js';
 import { readProjectMap, type ProjectMap } from '../projects/scan.js';
+import { readProjectMemory, type ProjectMemory } from '../init/memory.js';
+import { readFeatureClassifications } from '../projects/featureClassification.js';
+import { readChecksumsFile } from '../projects/checksum.js';
 
-// Only what the loop actually calls — accepted as a dependency rather than
-// constructed internally, so the loop is testable without a live API key.
-export type ResponsesClient = {
-    responses: {
-        create: (params: ResponseCreateParamsNonStreaming, options?: {signal?: AbortSignal}) => Promise<Response>;
-    };
-};
+export type { ResponsesClient } from './client.js';
 
 export type AgentStep =
     | {type: 'tool_call'; name: string; args: unknown}
@@ -78,16 +75,73 @@ Existing tests:
 ${formatList(tests)}`;
 }
 
-function buildSystemPrompt(context: ToolContext, projectMap: ProjectMap | null): string {
+// Everything already confirmed by content — from this project's own
+// classification cache, built up as a side effect of past read_file and
+// write_test_file calls — grouped by feature so the model can go straight
+// to a known file instead of re-discovering it by trial and error. Only
+// entries still fresh (checksum matches the file's current state) are
+// shown; a stale one would just be misleading a wrong lead.
+function summarizeKnownClassifications(projectRoot: string): string {
+    const classifications = readFeatureClassifications(projectRoot);
+    const checksums = readChecksumsFile(projectRoot);
+    const filesByFeature = new Map<string, string[]>();
+
+    for (const [file, entry] of Object.entries(classifications.entries)) {
+        if (checksums?.files[file]?.checksum !== entry.checksum) continue;
+
+        for (const feature of entry.features) {
+            const files = filesByFeature.get(feature) ?? [];
+            files.push(file);
+            filesByFeature.set(feature, files);
+        }
+    }
+
+    if (filesByFeature.size === 0) {
+        return 'None yet — nothing has been classified by feature so far.';
+    }
+
+    const lines = [...filesByFeature.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([feature, files]) => `- ${feature}: ${files.join(', ')}`);
+
+    return formatList(lines);
+}
+
+// Purely additive context — nothing here is enforced in code, it's the
+// project's own accumulated notes and conventions, handed to the model as
+// background before it writes anything.
+function summarizeMemory(memory: ProjectMemory): string {
+    const sections = [
+        memory.overview && `## Project overview\n${memory.overview}`,
+        memory.decisions && `## Testing decisions and conventions\n${memory.decisions}`,
+        memory.failures && `## Known failure patterns\n${memory.failures}`,
+    ].filter((section): section is string => Boolean(section));
+
+    return sections.length > 0 ? sections.join('\n\n') : 'No project memory recorded yet.';
+}
+
+function buildSystemPrompt(
+    context: ToolContext,
+    projectMap: ProjectMap | null,
+    memory: ProjectMemory,
+    knownClassifications: string,
+): string {
     return `You are Orbit, an AI QA agent for E2E testing.
 
 Your job: given a description of one or more features to test, write a Playwright test for each feature using the write_test_file tool, then run it using the run_test tool.
 
-If the prompt describes multiple distinct features, write a SEPARATE test file for each one (e.g. login.spec.ts, checkout.spec.ts) — do not combine multiple features into a single file. This keeps a repair cheap (you only need to resend the one file you're fixing, not every feature's test code) and keeps a failure in one feature from blocking the others. Use run_test's filePath argument to run and repair one feature's file independently of the others.
+If the prompt describes multiple distinct features, group the features according to the cateogories as there maybe sub-features within a single feature. Group those sub-feature in a single test file — do not combine multiple features into a single file. This keeps a repair cheap (you only need to resend the one file you're fixing, not every feature's test code) and keeps a failure in one feature from blocking the others. Use run_test's filePath argument to run and repair one feature's file independently of the others.
 
 ${summarizeProjectMap(projectMap)}
 
-Use this index to find the right file to read before writing selectors — prefer it over guessing paths. If a feature you're asked to test isn't listed, use read_file to explore starting from a route or component that seems related.
+Files already confirmed by feature (from past runs — read the file directly if what you need is listed here, instead of exploring blind):
+${knownClassifications}
+
+Use the project index above to find the right file to read before writing selectors — prefer it over guessing paths. If a feature you're asked to test isn't listed anywhere, use read_file to explore starting from a route or component that seems related.
+
+Project memory (read this before writing anything — avoid repeating documented failure patterns and follow documented conventions):
+
+${summarizeMemory(memory)}
 
 If a run fails because of a broken selector or similar test-side issue, you may patch that feature's test file and run it again — you have a budget of ${context.orbitConfig.maxRepairAttempts} repair attempts per feature. If a run fails because of an actual application bug (not a problem with the test itself), do not keep patching it — report that feature as failed instead.
 
@@ -95,6 +149,7 @@ Rules:
 - Prefer Playwright and role-based selectors (getByRole, getByLabel, getByText).
 - Use read_file to look at the actual markup of a component or route before writing selectors against it — do not guess.
 - write_test_file only accepts paths inside the project's configured test directory (${context.orbitConfig.testDir}).
+- write_test_file's features argument: short, lowercase, dot-separated names (e.g. "checkout", "checkout.payment") — a broad feature and, where it genuinely applies, a specific sub-feature, matching the same convention used in the project index above. List every sub-feature the file covers if it groups more than one. Keep this accurate on every call, including repair retries — it's used for coverage tracking, not just documentation.
 - Do not invent project features you have not verified by reading a file.
 - Do not attempt to read or use any variables in a .env file.
 - Call report_result exactly once, when you are completely done with every feature, with one result entry per feature. Do not stop without calling it.`;
@@ -136,6 +191,8 @@ export async function runTestingAgent(
     const maxSteps = options.maxSteps ?? 20;
     const client = options.client ?? createOpenAIClient();
     const projectMap = readProjectMap(context.projectRoot);
+    const memory = readProjectMemory(context.projectRoot);
+    const knownClassifications = summarizeKnownClassifications(context.projectRoot);
     const steps: AgentStep[] = [];
 
     let previousResponseId: string | undefined;
@@ -148,7 +205,7 @@ export async function runTestingAgent(
 
         const response = await client.responses.create({
             model: 'gpt-5.2',
-            instructions: buildSystemPrompt(context, projectMap),
+            instructions: buildSystemPrompt(context, projectMap, memory, knownClassifications),
             input: nextInput,
             previous_response_id: previousResponseId,
             tools: toolRegistry.map(toApiToolSchema),

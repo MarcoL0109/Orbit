@@ -7,6 +7,7 @@ import { readOrbitConfig } from '../init/config.js';
 import {scanProject, writeProjectMap} from '../projects/scan.js';
 import { getProjectPath } from '../init/deinit.js';
 import { formatScanResult } from "../projects/scan.js";
+import { computeCoverage, formatCoverageSummary, describeCoverageEntry, colorForCoverageStatus, type CoverageEntry } from '../projects/coverage.js';
 import { reportError, type ArgCountRule } from './error.js';
 
 
@@ -43,6 +44,7 @@ Available Orbit commands:
 /deinit     Delete the .orbit folder within the current project
 /scan       Build index and context for the current project
 /test       Generate and run a Playwright test for a feature you describe
+/coverage   Show routes and components that don't have a matching test
 /projects   Show remembered projects
 /memory     Show project memory
 /clear      Clear the screen
@@ -267,6 +269,63 @@ Available Orbit commands:
             } finally {
                 context.setIsThinking(false);
             }
+        }
+    },
+    {
+        name: 'coverage',
+        description: "Show routes and components that don't have a matching test",
+        usage: '/coverage',
+        argsRule: {exact: 0},
+        handler: async (_args, context) => {
+            if (!context.project?.root) {
+                reportError(context.setMessages, {kind: 'no-project-selected'});
+                return;
+            }
+
+            // Rescan first, not just read the last project-map.json — a
+            // test file written by a prior /test run didn't exist yet at
+            // that run's own pre-test rescan, so it (and its checksum)
+            // would be missing from a stale index entirely, not just
+            // outdated.
+            let projectMap;
+
+            try {
+                context.setIsThinking(true);
+                context.setAgentActivity('Scanning project for changes...');
+                projectMap = await scanProject(context.project.root);
+                writeProjectMap(context.project.root, projectMap);
+            } catch (error) {
+                reportError(context.setMessages, {
+                    kind: 'unexpected',
+                    action: 'Pre-coverage project scan',
+                    cause: error,
+                });
+                return;
+            } finally {
+                context.setIsThinking(false);
+                context.setAgentActivity(null);
+            }
+
+            const report = computeCoverage(projectMap, context.project.root);
+
+            function entryMessage(entry: CoverageEntry) {
+                return {
+                    role: 'agent' as const,
+                    content: describeCoverageEntry(entry),
+                    color: colorForCoverageStatus(entry.status),
+                };
+            }
+
+            context.setMessages((prev) => [
+                ...prev,
+                {role: 'agent', content: formatCoverageSummary(report)},
+                ...(report.routes.length > 0
+                    ? [{role: 'agent' as const, content: `Routes (${report.routes.length}):`}, ...report.routes.map(entryMessage)]
+                    : []),
+                ...(report.components.length > 0
+                    ? [{role: 'agent' as const, content: `Components (${report.components.length}):`}, ...report.components.map(entryMessage)]
+                    : []),
+            ]);
         }
     },
     // This command will remove .orbit folder and its record in the global memory in projects.json

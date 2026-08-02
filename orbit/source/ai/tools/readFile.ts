@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolDefinition } from './types.js';
+import { checksumFromContent } from '../../projects/checksum.js';
+import { getFreshClassification, recordClassification } from '../../projects/featureClassification.js';
+import { classifyFileFeatures } from '../classifyFeature.js';
 
 type ReadFileArgs = {
     path: string;
@@ -9,6 +12,12 @@ type ReadFileArgs = {
 type ReadFileData = {
     content: string;
 };
+
+// Only files worth asking "what feature does this implement" — classifying
+// a package.json or README this way would just waste an API call for an
+// answer that's always "none". Mirrors the SOURCE_EXTENSIONS set scan.ts
+// and path.ts each keep locally for their own equivalent purpose.
+const CLASSIFIABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs']);
 
 export const readFileTool: ToolDefinition<ReadFileArgs, ReadFileData> = {
     name: 'read_file',
@@ -38,14 +47,39 @@ export const readFileTool: ToolDefinition<ReadFileArgs, ReadFileData> = {
             return {ok: false, error: `File not found: ${relativePath}`};
         }
 
+        let content: string;
+
         try {
-            const content = fs.readFileSync(resolved, 'utf8');
-            return {ok: true, data: {content}};
+            content = fs.readFileSync(resolved, 'utf8');
         } catch (error) {
             return {
                 ok: false,
                 error: error instanceof Error ? error.message : String(error),
             };
         }
+
+        // Piggyback feature classification: best-effort, checksum-cached,
+        // and must never fail the read itself — a classification failure
+        // just means coverage stays at heuristic confidence for this file.
+        if (CLASSIFIABLE_EXTENSIONS.has(path.extname(relativePath))) {
+            try {
+                const checksum = checksumFromContent(content);
+                const cached = getFreshClassification(context.projectRoot, relativePath, checksum);
+
+                if (!cached) {
+                    const classification = await classifyFileFeatures(
+                        relativePath,
+                        content,
+                        undefined,
+                        context.signal,
+                    );
+                    recordClassification(context.projectRoot, relativePath, checksum, classification.features);
+                }
+            } catch {
+                // Classification is a bonus, not a requirement.
+            }
+        }
+
+        return {ok: true, data: {content}};
     },
 };
