@@ -1,12 +1,14 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Response, ResponseFunctionToolCall, ResponseInputItem } from 'openai/resources/responses/responses';
 import { createOpenAIClient, type ResponsesClient } from './client.js';
 import { toolRegistry, findTool, toApiToolSchema, type ToolContext, type ToolResult } from './tools/index.js';
 import type { ReportResultArgs, FeatureResult } from './tools/reportResult.js';
-import type { RunTestResult } from './tools/runTest.js';
+import type { RunTestResult, TestOutcome, TestStatus, TestFailureDetail } from './tools/runTest.js';
 import { readProjectMap, type ProjectMap } from '../projects/scan.js';
 import { readProjectMemory, type ProjectMemory } from '../init/memory.js';
 import { readFeatureClassifications } from '../projects/featureClassification.js';
-import { readChecksumsFile } from '../projects/checksum.js';
+import { checksumFromContent } from '../projects/checksum.js';
 
 export type { ResponsesClient } from './client.js';
 
@@ -51,17 +53,42 @@ function formatList(items: string[]): string {
     return shown.join('\n') + (remainder > 0 ? `\n...and ${remainder} more` : '');
 }
 
+// Files this run has already written, read straight from the loop's own
+// `steps` — no rescan, no hash, no freshness check needed. The run just
+// did this itself, moments ago; there's nothing to verify.
+function collectTestsWrittenThisRun(steps: AgentStep[], projectRoot: string): string[] {
+    const files = new Set<string>();
+
+    for (const step of steps) {
+        if (step.type === 'tool_result' && step.name === 'write_test_file' && step.result.ok) {
+            const data = step.result.data as {path: string};
+            files.add(path.relative(projectRoot, data.path));
+        }
+    }
+
+    return [...files];
+}
+
 // Reuses whatever /scan already computed instead of leaving the model to
 // guess file paths blind — read_file still exists for the actual deep dive
-// once it knows which file is relevant.
-function summarizeProjectMap(projectMap: ProjectMap | null): string {
+// once it knows which file is relevant. extraTestFiles covers the one gap
+// the last /scan can't: test files this run has itself written since that
+// scan ran, which won't be in projectMap yet.
+function summarizeProjectMap(projectMap: ProjectMap | null, extraTestFiles: string[]): string {
     if (!projectMap) {
         return 'No project index available yet (run /scan first for a list of known routes and components) — you will need to find files by informed guesswork.';
     }
 
     const routes = projectMap.routes.map((route) => `- ${route.route} -> ${route.file}`);
     const components = projectMap.components.map((component) => `- ${component.name} -> ${component.file}`);
-    const tests = projectMap.tests.map((test) => `- ${test.file}`);
+
+    const knownTestFiles = new Set(projectMap.tests.map((test) => test.file));
+    const tests = [
+        ...projectMap.tests.map((test) => `- ${test.file}`),
+        ...extraTestFiles
+            .filter((file) => !knownTestFiles.has(file))
+            .map((file) => `- ${file} (written this run)`),
+    ];
 
     return `Known project structure (from the last /scan, ${projectMap.generatedAt}):
 
@@ -83,11 +110,25 @@ ${formatList(tests)}`;
 // shown; a stale one would just be misleading a wrong lead.
 function summarizeKnownClassifications(projectRoot: string): string {
     const classifications = readFeatureClassifications(projectRoot);
-    const checksums = readChecksumsFile(projectRoot);
     const filesByFeature = new Map<string, string[]>();
 
     for (const [file, entry] of Object.entries(classifications.entries)) {
-        if (checksums?.files[file]?.checksum !== entry.checksum) continue;
+        // Checked against the file's actual current content, not
+        // checksums.json — that file is only refreshed by a full project
+        // scan, which doesn't happen between turns within a run, so it
+        // wouldn't know about anything classified earlier THIS run (like a
+        // test file write_test_file just wrote). Hashing directly is cheap
+        // here since it's only ever the bounded set of already-classified
+        // files, not a full-project walk.
+        let currentChecksum: string | null = null;
+
+        try {
+            currentChecksum = checksumFromContent(fs.readFileSync(path.join(projectRoot, file)));
+        } catch {
+            continue; // file no longer exists or isn't readable — treat as stale
+        }
+
+        if (currentChecksum !== entry.checksum) continue;
 
         for (const feature of entry.features) {
             const files = filesByFeature.get(feature) ?? [];
@@ -125,6 +166,7 @@ function buildSystemPrompt(
     projectMap: ProjectMap | null,
     memory: ProjectMemory,
     knownClassifications: string,
+    testsWrittenThisRun: string[],
 ): string {
     return `You are Orbit, an AI QA agent for E2E testing.
 
@@ -132,7 +174,7 @@ Your job: given a description of one or more features to test, write a Playwrigh
 
 If the prompt describes multiple distinct features, group the features according to the cateogories as there maybe sub-features within a single feature. Group those sub-feature in a single test file — do not combine multiple features into a single file. This keeps a repair cheap (you only need to resend the one file you're fixing, not every feature's test code) and keeps a failure in one feature from blocking the others. Use run_test's filePath argument to run and repair one feature's file independently of the others.
 
-${summarizeProjectMap(projectMap)}
+${summarizeProjectMap(projectMap, testsWrittenThisRun)}
 
 Files already confirmed by feature (from past runs — read the file directly if what you need is listed here, instead of exploring blind):
 ${knownClassifications}
@@ -190,9 +232,6 @@ export async function runTestingAgent(
 ): Promise<AgentRunResult> {
     const maxSteps = options.maxSteps ?? 20;
     const client = options.client ?? createOpenAIClient();
-    const projectMap = readProjectMap(context.projectRoot);
-    const memory = readProjectMemory(context.projectRoot);
-    const knownClassifications = summarizeKnownClassifications(context.projectRoot);
     const steps: AgentStep[] = [];
 
     let previousResponseId: string | undefined;
@@ -203,9 +242,23 @@ export async function runTestingAgent(
             return {status: 'aborted', summary: 'Aborted by user', results: [], steps};
         }
 
+        // Re-read fresh every turn, not once before the loop — a tool call
+        // earlier in this same run (e.g. write_test_file classifying a
+        // shared component while working on a different feature) should be
+        // visible to later turns, not just to the next run. This costs
+        // nothing extra: the API never carries `instructions` across
+        // previous_response_id chaining regardless (each call's
+        // instructions fully replaces the last, confirmed via the SDK's
+        // own docs), so there was never a reason for this to be a fixed
+        // snapshot in the first place.
+        const projectMap = readProjectMap(context.projectRoot);
+        const memory = readProjectMemory(context.projectRoot);
+        const knownClassifications = summarizeKnownClassifications(context.projectRoot);
+        const testsWrittenThisRun = collectTestsWrittenThisRun(steps, context.projectRoot);
+
         const response = await client.responses.create({
             model: 'gpt-5.2',
-            instructions: buildSystemPrompt(context, projectMap, memory, knownClassifications),
+            instructions: buildSystemPrompt(context, projectMap, memory, knownClassifications, testsWrittenThisRun),
             input: nextInput,
             previous_response_id: previousResponseId,
             tools: toolRegistry.map(toApiToolSchema),
@@ -278,6 +331,29 @@ const STATUS_LABEL: Record<AgentRunResult['status'], string> = {
     aborted: 'Aborted',
 };
 
+const TEST_STATUS_ICON: Record<TestStatus, string> = {
+    passed: '✓',
+    failed: '✘',
+    timedOut: '✘',
+    skipped: '○',
+    other: '?',
+};
+
+// Playwright-style: one line per test, not just an aggregate count or a
+// failures-only list — this is what run_test's full per-test data (not
+// just failures) was extended to support.
+function formatTestList(tests: TestOutcome[], failures: TestFailureDetail[]): string {
+    const errorByTitle = new Map(failures.map((failure) => [failure.testTitle, failure.errorMessage]));
+
+    return tests
+        .map((test) => {
+            const line = `    ${TEST_STATUS_ICON[test.status]} ${test.title} (${test.durationMs}ms)`;
+            const errorMessage = errorByTitle.get(test.title);
+            return errorMessage ? `${line}\n        ${errorMessage}` : line;
+        })
+        .join('\n');
+}
+
 const FEATURE_STATUS_ICON: Record<FeatureResult['status'], string> = {
     passed: '✓',
     failed: '✗',
@@ -326,12 +402,12 @@ export function formatAgentRunResult(result: AgentRunResult): string {
             : 'not run';
         const attemptsText = run && run.attempts > 1 ? `, ${run.attempts} attempts` : '';
 
-        const failuresText = run && run.result.failures.length > 0
-            ? '\n' + run.result.failures.map((failure) => `    - ${failure.testTitle}: ${failure.errorMessage}`).join('\n')
+        const testListText = run && run.result.tests.length > 0
+            ? '\n' + formatTestList(run.result.tests, run.result.failures)
             : '';
 
         return `${FEATURE_STATUS_ICON[feature.status]} ${feature.feature} (${feature.file}) — ${testsText}${attemptsText}
-    ${feature.summary}${failuresText}`;
+    ${feature.summary}${testListText}`;
     });
 
     return `${STATUS_LABEL[result.status]}: ${result.summary}

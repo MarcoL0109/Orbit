@@ -12,11 +12,20 @@ export type TestFailureDetail = {
     videoPath?: string;
 };
 
+export type TestStatus = 'passed' | 'failed' | 'timedOut' | 'skipped' | 'other';
+
+export type TestOutcome = {
+    title: string;
+    status: TestStatus;
+    durationMs: number;
+};
+
 export type RunTestResult = {
     passed: boolean;
     totalTests: number;
     passedCount: number;
     failedCount: number;
+    tests: TestOutcome[];
     failures: TestFailureDetail[];
     durationMs: number;
     reportPath: string;
@@ -66,6 +75,7 @@ type JsonReportAttachment = {name?: string; path?: string};
 type JsonReportError = {message?: string; stack?: string};
 type JsonReportTestResult = {
     status?: string;
+    duration?: number;
     error?: JsonReportError;
     errors?: JsonReportError[];
     attachments?: JsonReportAttachment[];
@@ -77,6 +87,43 @@ type JsonReport = {
     suites?: JsonReportSuite[];
     stats?: {duration?: number; expected?: number; unexpected?: number; skipped?: number; flaky?: number};
 };
+
+function normalizeStatus(status: string | undefined): TestStatus {
+    switch (status) {
+        case 'passed':
+        case 'failed':
+        case 'timedOut':
+        case 'skipped':
+            return status;
+        default:
+            return 'other';
+    }
+}
+
+// Every test, not just the failing ones — collectFailures below only ever
+// walked specs that failed, so a passing run had no per-test record at
+// all, just an aggregate count. This is what makes the Playwright-style
+// list (✓/✘ per test) possible.
+function collectAllTests(suites: JsonReportSuite[], tests: TestOutcome[]): void {
+    for (const suite of suites) {
+        for (const spec of suite.specs ?? []) {
+            for (const test of spec.tests ?? []) {
+                const results = test.results ?? [];
+                const lastResult = results[results.length - 1];
+
+                tests.push({
+                    title: spec.title ?? 'Untitled test',
+                    status: normalizeStatus(lastResult?.status),
+                    durationMs: lastResult?.duration ?? 0,
+                });
+            }
+        }
+
+        if (suite.suites?.length) {
+            collectAllTests(suite.suites, tests);
+        }
+    }
+}
 
 function collectFailures(suites: JsonReportSuite[], failures: TestFailureDetail[]): void {
     for (const suite of suites) {
@@ -116,6 +163,9 @@ export function parsePlaywrightJsonReport(raw: string, reportPath: string): RunT
     const failedCount = stats.unexpected ?? 0;
     const totalTests = passedCount + failedCount + (stats.skipped ?? 0) + (stats.flaky ?? 0);
 
+    const tests: TestOutcome[] = [];
+    collectAllTests(report.suites ?? [], tests);
+
     const failures: TestFailureDetail[] = [];
     collectFailures(report.suites ?? [], failures);
 
@@ -124,6 +174,7 @@ export function parsePlaywrightJsonReport(raw: string, reportPath: string): RunT
         totalTests,
         passedCount,
         failedCount,
+        tests,
         failures,
         durationMs: stats.duration ?? 0,
         reportPath,
