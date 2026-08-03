@@ -29,13 +29,11 @@ export function initOrbitProject({
   const indexDir = path.join(orbitDir, 'index');
   const memoryDir = path.join(orbitDir, 'memory');
   const sessionsDir = path.join(orbitDir, 'sessions');
-  const reportsDir = path.join(orbitDir, 'reports');
   const tracesDir = path.join(orbitDir, 'traces');
 
   fs.mkdirSync(indexDir, {recursive: true});
   fs.mkdirSync(memoryDir, {recursive: true});
   fs.mkdirSync(sessionsDir, {recursive: true});
-  fs.mkdirSync(reportsDir, {recursive: true});
   fs.mkdirSync(tracesDir, {recursive: true});
 
   const files: InitFileAction[] = [
@@ -117,7 +115,6 @@ Do not store secrets, passwords, tokens, or full raw logs.
     indexDir,
     memoryDir,
     sessionsDir,
-    reportsDir,
     tracesDir,
     files,
   };

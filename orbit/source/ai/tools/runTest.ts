@@ -42,11 +42,12 @@ function findPlaywrightBinary(projectRoot: string): string | null {
 // read or patch the user's own playwright.config.*. Absolute paths only,
 // so there's no relative-path resolution ambiguity to get wrong. .mjs
 // forces ESM regardless of the user's package.json "type" field.
-function buildOrbitPlaywrightConfigSource(testDirAbsolute: string, baseUrl: string): string {
+function buildOrbitPlaywrightConfigSource(testDirAbsolute: string, baseUrl: string, outputDirAbsolute: string): string {
     return `import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: ${JSON.stringify(testDirAbsolute)},
+  outputDir: ${JSON.stringify(outputDirAbsolute)},
   use: {
     baseURL: ${JSON.stringify(baseUrl)},
     trace: 'retain-on-failure',
@@ -217,17 +218,27 @@ export const runTestTool: ToolDefinition<RunTestArgs, RunTestResult> = {
 
         const testDirAbsolute = path.resolve(context.projectRoot, context.orbitConfig.testDir);
         const indexDir = path.join(context.projectRoot, '.orbit', 'index');
+
+        // A fresh, uniquely-named subfolder per run — Playwright cleans
+        // outputDir at the start of every run, so a fixed shared path would
+        // silently wipe out a prior run's screenshots/traces/videos (and
+        // any session log or repair-loop step still referencing them).
+        const runId = new Date().toISOString().replace(/[:.]/g, '-');
+        const outputDirAbsolute = path.join(context.projectRoot, '.orbit', 'traces', runId);
         fs.mkdirSync(indexDir, {recursive: true});
+        fs.mkdirSync(outputDirAbsolute, {recursive: true});
 
         const configPath = path.join(indexDir, 'playwright.config.mjs');
         fs.writeFileSync(
             configPath,
-            buildOrbitPlaywrightConfigSource(testDirAbsolute, context.orbitConfig.baseUrl),
+            buildOrbitPlaywrightConfigSource(testDirAbsolute, context.orbitConfig.baseUrl, outputDirAbsolute),
             'utf8',
         );
 
-        const reportPath = path.join(context.projectRoot, '.orbit', 'reports', 'last-run.json');
-        fs.mkdirSync(path.dirname(reportPath), {recursive: true});
+        // Same run-id folder as the trace artifacts, so a session log's
+        // reportPath still resolves to a real file instead of one a later
+        // run has since overwritten.
+        const reportPath = path.join(outputDirAbsolute, 'report.json');
 
         const args = ['test', '--config', configPath, '--reporter=json'];
         if (filePath) {
