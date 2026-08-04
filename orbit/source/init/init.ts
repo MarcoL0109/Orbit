@@ -16,6 +16,59 @@ export type InitFileAction = {
   action: 'created' | 'skipped';
 };
 
+type PackageJsonForPortDetection = {
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+};
+
+// Checked most-specific-first: frameworks that are themselves built on Vite
+// (SvelteKit) are matched before the generic 'vite' dependency, so they get
+// their own port rather than always falling through to Vite's default.
+const FRAMEWORK_DEFAULT_PORTS: Array<{dependency: string; port: number}> = [
+  {dependency: 'next', port: 3000},
+  {dependency: '@sveltejs/kit', port: 5173},
+  {dependency: '@angular/core', port: 4200},
+  {dependency: '@vue/cli-service', port: 8080},
+  {dependency: 'vite', port: 5173},
+];
+
+function readJsonFile<T>(filePath: string): T | null {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
+  } catch {
+    return null;
+  }
+}
+
+// Layered guesses, most-trustworthy first: an explicit override in the dev
+// script beats an .env default, which beats a bare framework convention —
+// each of those only tells you what's likely, the earlier ones tell you
+// what was actually configured.
+function detectDevServerPort(projectRoot: string): number {
+  const packageJson = readJsonFile<PackageJsonForPortDetection>(path.join(projectRoot, 'package.json'));
+
+  const devScript = packageJson?.scripts?.['dev'] ?? packageJson?.scripts?.['start'] ?? '';
+  const scriptPortMatch = devScript.match(/(?:--port|-p)[=\s]+(\d{2,5})/) ?? devScript.match(/\bPORT=(\d{2,5})/);
+  if (scriptPortMatch?.[1]) {
+    return Number(scriptPortMatch[1]);
+  }
+
+  for (const envFile of ['.env.local', '.env']) {
+    const envPath = path.join(projectRoot, envFile);
+    if (!fs.existsSync(envPath)) continue;
+
+    const match = fs.readFileSync(envPath, 'utf8').match(/^PORT=(\d{2,5})/m);
+    if (match?.[1]) return Number(match[1]);
+  }
+
+  const deps = {...(packageJson?.dependencies ?? {}), ...(packageJson?.devDependencies ?? {})};
+  const frameworkMatch = FRAMEWORK_DEFAULT_PORTS.find(({dependency}) => dependency in deps);
+  if (frameworkMatch) return frameworkMatch.port;
+
+  return 3000;
+}
+
 export function initOrbitProject({
   projectRoot,
   projectName,
@@ -50,7 +103,7 @@ export function initOrbitProject({
     writeJsonIfMissing(projectRoot, path.join(orbitDir, 'config.json'), {
       approvalMode: 'ask',
       defaultBrowser: 'chromium',
-      baseUrl: 'http://localhost:3000',
+      baseUrl: `http://localhost:${detectDevServerPort(projectRoot)}`,
       devCommand: null,
       testCommand: null,
       testDir: 'tests/e2e',
