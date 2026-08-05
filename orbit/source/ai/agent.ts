@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { Response, ResponseFunctionToolCall, ResponseInputItem } from 'openai/resources/responses/responses';
 import { createOpenAIClient, type ResponsesClient } from './client.js';
 import { toolRegistry, findTool, toApiToolSchema, type ToolContext, type ToolResult } from './tools/index.js';
+import { spawnBrowserWorker, type BrowserWorkerHandle } from './browserWorker.js';
 import type { ReportResultArgs, FeatureResult } from './tools/reportResult.js';
 import type { RunTestResult, TestOutcome, TestStatus, TestFailureDetail } from './tools/runTest.js';
 import { readProjectMap, type ProjectMap } from '../projects/scan.js';
@@ -32,6 +33,7 @@ const ACTIVITY_LABEL: Record<string, string> = {
     write_test_file: 'Writing the test file...',
     run_test: 'Running the test...',
     report_result: 'Wrapping up...',
+    browser_action: 'Exploring the page...',
 };
 
 export function describeAgentActivity(event: AgentProgressEvent): string {
@@ -187,9 +189,11 @@ ${summarizeMemory(memory)}
 
 If a run fails because of a broken selector or similar test-side issue, you may patch that feature's test file and run it again — you have a budget of ${context.orbitConfig.maxRepairAttempts} repair attempts per feature. If a run fails because of an actual application bug (not a problem with the test itself), do not keep patching it — report that feature as failed instead.
 
+Exploring with a real browser (browser_action): read_file shows you source code, not what actually renders — runtime data, conditional branches, and component-library internals can all make the real page different from what the source suggests. Use browser_action to ground your selectors and expected outcomes in what you actually observe, especially for anything read_file can't tell you: content behind a login, a multi-step flow with no direct URL per step, or a state that only appears after an interaction (a toast, a modal, a cart badge). navigate/click/fill already return the resulting accessibility snapshot whenever the page actually changed — you don't need to separately call snapshot after them. Call snapshot on its own only to re-check the current state without taking a new action. Call reset when you start exploring a NEW feature (fresh cookies/storage) — do not call it between pages within the same feature's flow, since a multi-page journey (e.g. cart -> checkout -> payment) depends on staying in the same browser context throughout.
+
 Rules:
 - Prefer Playwright and role-based selectors (getByRole, getByLabel, getByText).
-- Use read_file to look at the actual markup of a component or route before writing selectors against it — do not guess.
+- Use read_file to look at the actual markup of a component or route before writing selectors against it — do not guess. Use browser_action when you need to see what's actually rendered, not just what the source suggests.
 - write_test_file only accepts paths inside the project's configured test directory (${context.orbitConfig.testDir}).
 - write_test_file's features argument: short, lowercase, dot-separated names (e.g. "checkout", "checkout.payment") — a broad feature and, where it genuinely applies, a specific sub-feature, matching the same convention used in the project index above. List every sub-feature the file covers if it groups more than one. Keep this accurate on every call, including repair retries — it's used for coverage tracking, not just documentation.
 - Do not invent project features you have not verified by reading a file.
@@ -227,101 +231,122 @@ function summarizeFeatureResults(results: FeatureResult[]): string {
 
 export async function runTestingAgent(
     prompt: string,
-    context: ToolContext,
+    context: Omit<ToolContext, 'getBrowserWorker'>,
     options: RunTestingAgentOptions = {},
 ): Promise<AgentRunResult> {
     const maxSteps = options.maxSteps ?? 20;
     const client = options.client ?? createOpenAIClient();
     const steps: AgentStep[] = [];
 
+    // Owned by the run, not by any individual tool call — lazily spawned on
+    // first use, reused across every feature in this run (paying the launch
+    // cost once), respawned if it crashed, and always closed below
+    // regardless of how the run ends. A ref-cell object rather than a bare
+    // `let`, since a `let` reassigned only inside a nested closure confuses
+    // TS's narrowing at the finally block below.
+    const browserWorkerRef: {current: BrowserWorkerHandle | null} = {current: null};
+    const toolContext: ToolContext = {
+        ...context,
+        getBrowserWorker: async () => {
+            if (!browserWorkerRef.current || !browserWorkerRef.current.isAlive()) {
+                browserWorkerRef.current = spawnBrowserWorker(context.projectRoot, context.orbitConfig.defaultBrowser);
+            }
+            return browserWorkerRef.current;
+        },
+    };
+
     let previousResponseId: string | undefined;
     let nextInput: string | ResponseInputItem[] = prompt;
 
-    for (let stepCount = 0; stepCount < maxSteps; stepCount++) {
-        if (context.signal.aborted) {
-            return {status: 'aborted', summary: 'Aborted by user', results: [], steps};
-        }
+    try {
+        for (let stepCount = 0; stepCount < maxSteps; stepCount++) {
+            if (context.signal.aborted) {
+                return {status: 'aborted', summary: 'Aborted by user', results: [], steps};
+            }
 
-        // Re-read fresh every turn, not once before the loop — a tool call
-        // earlier in this same run (e.g. write_test_file classifying a
-        // shared component while working on a different feature) should be
-        // visible to later turns, not just to the next run. This costs
-        // nothing extra: the API never carries `instructions` across
-        // previous_response_id chaining regardless (each call's
-        // instructions fully replaces the last, confirmed via the SDK's
-        // own docs), so there was never a reason for this to be a fixed
-        // snapshot in the first place.
-        const projectMap = readProjectMap(context.projectRoot);
-        const memory = readProjectMemory(context.projectRoot);
-        const knownClassifications = summarizeKnownClassifications(context.projectRoot);
-        const testsWrittenThisRun = collectTestsWrittenThisRun(steps, context.projectRoot);
+            // Re-read fresh every turn, not once before the loop — a tool call
+            // earlier in this same run (e.g. write_test_file classifying a
+            // shared component while working on a different feature) should be
+            // visible to later turns, not just to the next run. This costs
+            // nothing extra: the API never carries `instructions` across
+            // previous_response_id chaining regardless (each call's
+            // instructions fully replaces the last, confirmed via the SDK's
+            // own docs), so there was never a reason for this to be a fixed
+            // snapshot in the first place.
+            const projectMap = readProjectMap(context.projectRoot);
+            const memory = readProjectMemory(context.projectRoot);
+            const knownClassifications = summarizeKnownClassifications(context.projectRoot);
+            const testsWrittenThisRun = collectTestsWrittenThisRun(steps, context.projectRoot);
 
-        const response = await client.responses.create({
-            model: 'gpt-5.2',
-            instructions: buildSystemPrompt(context, projectMap, memory, knownClassifications, testsWrittenThisRun),
-            input: nextInput,
-            previous_response_id: previousResponseId,
-            tools: toolRegistry.map(toApiToolSchema),
-        }, {signal: context.signal});
+            const response = await client.responses.create({
+                model: 'gpt-5.2',
+                instructions: buildSystemPrompt(toolContext, projectMap, memory, knownClassifications, testsWrittenThisRun),
+                input: nextInput,
+                previous_response_id: previousResponseId,
+                tools: toolRegistry.map(toApiToolSchema),
+            }, {signal: context.signal});
 
-        previousResponseId = response.id;
+            previousResponseId = response.id;
 
-        const functionCalls = extractFunctionCalls(response);
+            const functionCalls = extractFunctionCalls(response);
 
-        if (functionCalls.length === 0) {
-            return {
-                status: 'gave_up',
-                summary: response.output_text || 'Agent stopped without reporting a result',
-                results: [],
-                steps,
-            };
-        }
-
-        const outputItems: ResponseInputItem[] = [];
-        let finalResult: AgentRunResult | null = null;
-
-        for (const call of functionCalls) {
-            const args = parseToolArguments(call.arguments);
-            steps.push({type: 'tool_call', name: call.name, args});
-            options.onProgress?.({name: call.name});
-
-            const tool = findTool(call.name);
-            const result: ToolResult = tool
-                ? await tool.execute(args, context)
-                : {ok: false, error: `Unknown tool: ${call.name}`};
-
-            steps.push({type: 'tool_result', name: call.name, result});
-
-            outputItems.push({
-                type: 'function_call_output',
-                call_id: call.call_id,
-                output: JSON.stringify(result),
-            });
-
-            if (call.name === 'report_result' && result.ok) {
-                const data = result.data as ReportResultArgs;
-                finalResult = {
-                    status: deriveOverallStatus(data.results),
-                    summary: summarizeFeatureResults(data.results),
-                    results: data.results,
+            if (functionCalls.length === 0) {
+                return {
+                    status: 'gave_up',
+                    summary: response.output_text || 'Agent stopped without reporting a result',
+                    results: [],
                     steps,
                 };
             }
+
+            const outputItems: ResponseInputItem[] = [];
+            let finalResult: AgentRunResult | null = null;
+
+            for (const call of functionCalls) {
+                const args = parseToolArguments(call.arguments);
+                steps.push({type: 'tool_call', name: call.name, args});
+                options.onProgress?.({name: call.name});
+
+                const tool = findTool(call.name);
+                const result: ToolResult = tool
+                    ? await tool.execute(args, toolContext)
+                    : {ok: false, error: `Unknown tool: ${call.name}`};
+
+                steps.push({type: 'tool_result', name: call.name, result});
+
+                outputItems.push({
+                    type: 'function_call_output',
+                    call_id: call.call_id,
+                    output: JSON.stringify(result),
+                });
+
+                if (call.name === 'report_result' && result.ok) {
+                    const data = result.data as ReportResultArgs;
+                    finalResult = {
+                        status: deriveOverallStatus(data.results),
+                        summary: summarizeFeatureResults(data.results),
+                        results: data.results,
+                        steps,
+                    };
+                }
+            }
+
+            if (finalResult) {
+                return finalResult;
+            }
+
+            nextInput = outputItems;
         }
 
-        if (finalResult) {
-            return finalResult;
-        }
-
-        nextInput = outputItems;
+        return {
+            status: 'gave_up',
+            summary: `Stopped after ${maxSteps} steps without a final result`,
+            results: [],
+            steps,
+        };
+    } finally {
+        browserWorkerRef.current?.close();
     }
-
-    return {
-        status: 'gave_up',
-        summary: `Stopped after ${maxSteps} steps without a final result`,
-        results: [],
-        steps,
-    };
 }
 
 const STATUS_LABEL: Record<AgentRunResult['status'], string> = {

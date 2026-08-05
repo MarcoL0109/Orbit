@@ -41,12 +41,21 @@ function readJsonFile<T>(filePath: string): T | null {
   }
 }
 
+// Common places a frontend's own package.json lives in a split/monorepo
+// layout, checked when the project root itself has no dev server signal —
+// e.g. a root package.json that only orchestrates ("build-prod": "yarn
+// --cwd Frontend build") with the actual vite/next/etc. dependency one
+// level down.
+const FRONTEND_SUBFOLDER_CANDIDATES = ['Frontend', 'frontend', 'client', 'web'];
+
 // Layered guesses, most-trustworthy first: an explicit override in the dev
 // script beats an .env default, which beats a bare framework convention —
 // each of those only tells you what's likely, the earlier ones tell you
-// what was actually configured.
-function detectDevServerPort(projectRoot: string): number {
-  const packageJson = readJsonFile<PackageJsonForPortDetection>(path.join(projectRoot, 'package.json'));
+// what was actually configured. Returns null (not a fallback port) so the
+// caller can move on to the next candidate directory instead of locking in
+// a default before checking a subfolder that might have a real answer.
+function detectPortFromDirectory(dir: string): number | null {
+  const packageJson = readJsonFile<PackageJsonForPortDetection>(path.join(dir, 'package.json'));
 
   const devScript = packageJson?.scripts?.['dev'] ?? packageJson?.scripts?.['start'] ?? '';
   const scriptPortMatch = devScript.match(/(?:--port|-p)[=\s]+(\d{2,5})/) ?? devScript.match(/\bPORT=(\d{2,5})/);
@@ -55,7 +64,7 @@ function detectDevServerPort(projectRoot: string): number {
   }
 
   for (const envFile of ['.env.local', '.env']) {
-    const envPath = path.join(projectRoot, envFile);
+    const envPath = path.join(dir, envFile);
     if (!fs.existsSync(envPath)) continue;
 
     const match = fs.readFileSync(envPath, 'utf8').match(/^PORT=(\d{2,5})/m);
@@ -65,6 +74,17 @@ function detectDevServerPort(projectRoot: string): number {
   const deps = {...(packageJson?.dependencies ?? {}), ...(packageJson?.devDependencies ?? {})};
   const frameworkMatch = FRAMEWORK_DEFAULT_PORTS.find(({dependency}) => dependency in deps);
   if (frameworkMatch) return frameworkMatch.port;
+
+  return null;
+}
+
+function detectDevServerPort(projectRoot: string): number {
+  const candidateDirs = [projectRoot, ...FRONTEND_SUBFOLDER_CANDIDATES.map((sub) => path.join(projectRoot, sub))];
+
+  for (const dir of candidateDirs) {
+    const port = detectPortFromDirectory(dir);
+    if (port !== null) return port;
+  }
 
   return 3000;
 }

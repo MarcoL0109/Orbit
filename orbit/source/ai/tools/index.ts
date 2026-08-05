@@ -3,6 +3,7 @@ import { readFileTool } from './readFile.js';
 import { writeTestFileTool } from './writeTestFile.js';
 import { runTestTool } from './runTest.js';
 import { reportResultTool } from './reportResult.js';
+import { browserActionTool } from './browserAction.js';
 import type { ToolDefinition } from './types.js';
 
 export const toolRegistry: ToolDefinition[] = [
@@ -10,6 +11,7 @@ export const toolRegistry: ToolDefinition[] = [
     writeTestFileTool,
     runTestTool,
     reportResultTool,
+    browserActionTool,
 ];
 
 export function findTool(name: string): ToolDefinition | undefined {
@@ -35,7 +37,8 @@ export function toApiToolSchema(tool: ToolDefinition): FunctionTool {
     };
 }
 
-export { readFileTool, writeTestFileTool, runTestTool, reportResultTool };
+export { readFileTool, writeTestFileTool, runTestTool, reportResultTool, browserActionTool };
 export type { RunTestResult, TestFailureDetail } from './runTest.js';
 export type { ReportResultArgs } from './reportResult.js';
+export type { BrowserActionArgs } from './browserAction.js';
 export type { ToolContext, ToolResult, ToolDefinition } from './types.js';

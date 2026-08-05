@@ -1,4 +1,5 @@
 import type { OrbitConfig } from '../../init/config.js';
+import type { BrowserWorkerHandle } from '../browserWorker.js';
 
 export type ToolResult<T = unknown> =
     | {ok: true; data: T}
@@ -12,6 +13,10 @@ export type ToolContext = {
     // relevant OrbitConfig mode is 'ask' — tools decide when to call this,
     // the loop doesn't force it.
     requestApproval: (description: string) => Promise<boolean>;
+    // Lazily spawns (or reuses, or respawns after a crash) the one browser
+    // worker for this run — see agent.ts, which owns the actual lifecycle
+    // and cleanup. Tools never spawn or close it themselves.
+    getBrowserWorker: () => Promise<BrowserWorkerHandle>;
 };
 
 // A minimal JSON Schema object — only what's needed to describe a tool's
