@@ -78,7 +78,69 @@ function detectPortFromDirectory(dir: string): number | null {
   return null;
 }
 
-function detectDevServerPort(projectRoot: string): number {
+const COMPOSE_FILE_CANDIDATES = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'];
+
+type DockerComposeDetection = {
+  file: string | null;
+  hasHealthchecks: boolean;
+};
+
+const FRONTEND_SERVICE_NAME_HINTS = ['frontend', 'web', 'client', 'ui', 'app'];
+
+// Line-scan, not a real YAML parse: tracks which top-level service block
+// (2-space-indented "name:" under services:) each line belongs to, and only
+// reads a "HOST:CONTAINER" port mapping while inside a service whose name
+// looks frontend-like. This matters — a compose file's OTHER services (a
+// backend, a cache, a database) commonly expose their own ports too, and
+// grabbing the first port found anywhere would just as easily return one of
+// those instead of the one a browser actually needs to hit. Standard 2-space
+// compose indentation is assumed; anything else silently finds nothing here.
+function detectDockerComposeFrontendPort(composeFilePath: string): number | null {
+  let content: string;
+  try {
+    content = fs.readFileSync(composeFilePath, 'utf8');
+  } catch {
+    return null;
+  }
+
+  let inFrontendLikeService = false;
+
+  for (const line of content.split('\n')) {
+    // Top-level key (e.g. "volumes:" after the services block) always exits
+    // whatever service block preceded it.
+    if (/^\S/.test(line)) {
+      inFrontendLikeService = false;
+      continue;
+    }
+
+    const serviceMatch = line.match(/^ {2}([A-Za-z0-9_.-]+):\s*(#.*)?$/);
+    if (serviceMatch) {
+      const name = serviceMatch[1]!.toLowerCase();
+      inFrontendLikeService = FRONTEND_SERVICE_NAME_HINTS.some((hint) => name.includes(hint));
+      continue;
+    }
+
+    if (!inFrontendLikeService) continue;
+
+    const portMatch = line.match(/^\s*-\s*["']?(\d{2,5}):(\d{2,5})["']?\s*(#.*)?$/);
+    if (portMatch?.[1]) {
+      return Number(portMatch[1]);
+    }
+  }
+
+  return null;
+}
+
+// A compose-mapped frontend port is checked first when available — it's the
+// actual host-reachable port for a containerized dev setup regardless of
+// what a service's own internal script/env thinks its port is (Compose can
+// remap it to anything). Falls through to the non-Docker signals otherwise.
+function detectDevServerPort(projectRoot: string, dockerCompose: DockerComposeDetection): number {
+  if (dockerCompose.file) {
+    const composePort = detectDockerComposeFrontendPort(path.join(projectRoot, dockerCompose.file));
+    if (composePort !== null) return composePort;
+  }
+
   const candidateDirs = [projectRoot, ...FRONTEND_SUBFOLDER_CANDIDATES.map((sub) => path.join(projectRoot, sub))];
 
   for (const dir of candidateDirs) {
@@ -89,6 +151,30 @@ function detectDevServerPort(projectRoot: string): number {
   return 3000;
 }
 
+// Detect-and-store only — no YAML parser dependency for what's just a
+// presence check. A top-level-indented "healthcheck:" key is specific
+// enough in compose files (not a word that shows up as a stray value) that
+// a line-anchored regex is a reasonable, dependency-free heuristic here;
+// a future phase that actually needs per-service detail can revisit this.
+function detectDockerCompose(projectRoot: string): DockerComposeDetection {
+  for (const candidate of COMPOSE_FILE_CANDIDATES) {
+    const fullPath = path.join(projectRoot, candidate);
+    if (!fs.existsSync(fullPath)) continue;
+
+    let hasHealthchecks = false;
+    try {
+      hasHealthchecks = /^\s*healthcheck:\s*$/m.test(fs.readFileSync(fullPath, 'utf8'));
+    } catch {
+      // File exists but couldn't be read — still report it as found, just
+      // without healthcheck info.
+    }
+
+    return {file: candidate, hasHealthchecks};
+  }
+
+  return {file: null, hasHealthchecks: false};
+}
+
 export function initOrbitProject({
   projectRoot,
   projectName,
@@ -97,6 +183,7 @@ export function initOrbitProject({
   testFramework,
 }: InitOrbitProjectOptions) {
   const now = new Date().toISOString();
+  const dockerCompose = detectDockerCompose(projectRoot);
 
   const orbitDir = path.join(projectRoot, '.orbit');
   const indexDir = path.join(orbitDir, 'index');
@@ -123,12 +210,14 @@ export function initOrbitProject({
     writeJsonIfMissing(projectRoot, path.join(orbitDir, 'config.json'), {
       approvalMode: 'ask',
       defaultBrowser: 'chromium',
-      baseUrl: `http://localhost:${detectDevServerPort(projectRoot)}`,
-      devCommand: null,
+      baseUrl: `http://localhost:${detectDevServerPort(projectRoot, dockerCompose)}`,
+      devCommand: dockerCompose.file ? 'docker compose up' : null,
       testCommand: null,
       testDir: 'tests/e2e',
       writeMode: 'ask',
       maxRepairAttempts: 3,
+      dockerComposeFile: dockerCompose.file,
+      dockerComposeHasHealthchecks: dockerCompose.hasHealthchecks,
     } satisfies OrbitConfig),
 
     writeTextIfMissing(
