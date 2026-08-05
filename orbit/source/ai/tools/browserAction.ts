@@ -18,7 +18,7 @@ function toToolResult(response: BrowserWorkerResponse): ToolResult<BrowserWorker
 export const browserActionTool: ToolDefinition<BrowserActionArgs, BrowserWorkerResponse> = {
     name: 'browser_action',
     description:
-        'Interact with a real, running browser to ground exploration in what actually renders, instead of guessing from source. "navigate" loads a URL. "click" and "fill" act on a Playwright locator string (e.g. role=button[name="Submit"], text=..., or CSS) and, like navigate, return the resulting accessibility snapshot only if the page actually changed. "snapshot" always returns the current accessibility tree regardless of change, for an explicit re-check. "reset" starts a clean browser context (fresh cookies/storage) — call it when starting exploration for a NEW feature, never between pages within the same feature\'s flow, since a multi-page flow depends on staying in the same context.',
+        'Interact with a real, running browser to ground exploration in what actually renders, instead of guessing from source. "navigate" loads a URL. "click" and "fill" act on a Playwright locator string (e.g. role=button[name="Submit"], text=..., or CSS) and, like navigate, return the resulting accessibility snapshot only if the page actually changed. "snapshot" always returns the current accessibility tree regardless of change, for an explicit re-check. "reset" starts a clean browser context (fresh cookies/storage) — call it when starting exploration for a NEW feature, never between pages within the same feature\'s flow, since a multi-page flow depends on staying in the same context. It also refuses to run if you have an unused value from request_user_input pending (use it in a fill first) — resetting mid-flow with a manually-obtained value still outstanding throws away the exact session that value was tied to.',
     parameters: {
         type: 'object',
         properties: {
@@ -63,6 +63,13 @@ export const browserActionTool: ToolDefinition<BrowserActionArgs, BrowserWorkerR
                 return toToolResult(await worker.send({action: 'snapshot'}));
 
             case 'reset':
+                if (context.hasUnconsumedManualInput()) {
+                    return {
+                        ok: false,
+                        error: 'Refusing to reset: you have a value from request_user_input that has not been used in a fill yet. Resetting now throws away the session that value belongs to — if reaching this point again requires re-triggering the action that requested it (e.g. clicking "send code"), that repeats the real side effect and invalidates the value you were just given. Use the value first, then reset if you still need to.',
+                    };
+                }
+
                 return toToolResult(await worker.send({action: 'reset'}));
         }
     },

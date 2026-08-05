@@ -39,6 +39,8 @@ export function App({ initialPrompt }: AppProps) {
 	const [confirmDeinit, setConfirmDeinit] = useState<boolean>(false);
 	const [confirmName, setConfirmName] = useState<string>("");
 	const [pendingApproval, setPendingApproval] = useState<{description: string; resolve: (approved: boolean) => void} | null>(null);
+	const [pendingInput, setPendingInput] = useState<{prompt: string; resolve: (value: string | null) => void} | null>(null);
+	const [pendingInputValue, setPendingInputValue] = useState<string>("");
 	const [agentActivity, setAgentActivity] = useState<string | null>(null);
 	const currentAbortControllerRef = useRef<AbortController | null>(null);
 	const ghostCompletetion = getGhostCompletion(query);
@@ -52,6 +54,12 @@ export function App({ initialPrompt }: AppProps) {
 		if (completion) {
 			setQuery(completion + ' ');
 		}
+		}
+
+		if (key.escape && pendingInput) {
+			pendingInput.resolve(null);
+			setPendingInput(null);
+			setPendingInputValue('');
 		}
 	});
 
@@ -112,6 +120,20 @@ export function App({ initialPrompt }: AppProps) {
 	function handleApprovalSelect(item: any) {
 		pendingApproval?.resolve(item.value === 'approve');
 		setPendingApproval(null);
+	}
+
+
+	function requestInput(prompt: string): Promise<string | null> {
+		return new Promise((resolve) => {
+			setPendingInput({prompt, resolve});
+		});
+	}
+
+
+	function handleInputSubmit(value: string) {
+		pendingInput?.resolve(value.trim() || null);
+		setPendingInput(null);
+		setPendingInputValue('');
 	}
 
 
@@ -217,6 +239,7 @@ ${skippedText}
   			abortCurrentTask,
 			setConfirmDeinit,
 			requestApproval,
+			requestInput,
 			setAgentActivity,
 		});
 
@@ -478,7 +501,7 @@ Global memory updated:
 			))}
 		</Box>
 
-		{isBooting || selectProjectMode || confirmDeinit || checkName || isInitting || pendingApproval ? (
+		{isBooting || selectProjectMode || confirmDeinit || checkName || isInitting || pendingApproval || pendingInput ? (
 			<Box marginTop={1}>
 				<Text color="yellow">
 					<Spinner type="dots" /> Selection Menu In Progress...
@@ -571,6 +594,21 @@ Global memory updated:
 					<SelectInput
 						items={[{label: "Approve", value: "approve"}, {label: "Deny", value: "deny"}]}
 						onSelect={handleApprovalSelect}
+					/>
+				</Box>
+			)
+		}
+
+		{
+			pendingInput && (
+				<Box flexDirection="column">
+					<Text color="yellow">Orbit needs: {pendingInput.prompt}</Text>
+					<Text dimColor>(Press Esc to decline)</Text>
+					<TextInput
+						value={pendingInputValue}
+						onChange={setPendingInputValue}
+						onSubmit={handleInputSubmit}
+						placeholder="Type the value..."
 					/>
 				</Box>
 			)

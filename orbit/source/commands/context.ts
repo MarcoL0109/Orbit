@@ -42,5 +42,6 @@ export type CommandContext = {
     abortCurrentTask: () => boolean;
     setConfirmDeinit: React.Dispatch<React.SetStateAction<boolean>>;
     requestApproval: (description: string) => Promise<boolean>;
+    requestInput: (prompt: string) => Promise<string | null>;
     setAgentActivity: React.Dispatch<React.SetStateAction<string | null>>;
 };

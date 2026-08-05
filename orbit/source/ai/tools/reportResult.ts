@@ -2,9 +2,27 @@ import type { ToolDefinition } from './types.js';
 
 export type FeatureResult = {
     feature: string;
-    file: string;
+    // Null when requiresManualInput is true and no test file was written —
+    // a persisted test for a flow gated behind manually-supplied, single-use
+    // external input (an emailed code, etc.) can't pass unattended on a
+    // future run, and reaching the same point again would repeat whatever
+    // real side effect that step has (e.g. sending another real email) every
+    // time it runs. Non-null otherwise.
+    file: string | null;
     status: 'passed' | 'failed' | 'gave_up';
     summary: string;
+    // True if this feature's test needed request_user_input to get past a
+    // step it can't automate unattended (e.g. a one-time code). status still
+    // reflects the run's actual pass/fail — this only flags that a human was
+    // involved, so a "passed" run doesn't get mistaken for a fully
+    // unattended-repeatable one.
+    requiresManualInput: boolean;
+    // The manually-assisted step's own outcome, kept separate from `status`
+    // since the two can diverge (e.g. the manual step succeeded but a later,
+    // unrelated assertion failed). Non-null exactly when requiresManualInput
+    // is true — this is what actually answers "did the manual part work",
+    // not just prose in `summary` that the model might forget to include.
+    manualStepOutcome: 'succeeded' | 'failed' | null;
 };
 
 export type ReportResultArgs = {
@@ -32,8 +50,8 @@ export const reportResultTool: ToolDefinition<ReportResultArgs, ReportResultArgs
                             description: 'Short name of the feature, e.g. "login"',
                         },
                         file: {
-                            type: 'string',
-                            description: 'Path (relative to the test directory) of the test file written for this feature',
+                            type: ['string', 'null'],
+                            description: 'Path (relative to the test directory) of the test file written for this feature, or null if requiresManualInput is true and you deliberately did not write one (see requiresManualInput).',
                         },
                         status: {
                             type: 'string',
@@ -42,10 +60,19 @@ export const reportResultTool: ToolDefinition<ReportResultArgs, ReportResultArgs
                         },
                         summary: {
                             type: 'string',
-                            description: 'One or two sentences on this feature\'s outcome',
+                            description: 'One or two sentences on this feature\'s outcome.',
+                        },
+                        requiresManualInput: {
+                            type: 'boolean',
+                            description: 'true if you called request_user_input anywhere while testing this feature, false otherwise.',
+                        },
+                        manualStepOutcome: {
+                            type: ['string', 'null'],
+                            enum: ['succeeded', 'failed'],
+                            description: 'Whether the manually-assisted step itself worked once given the value (e.g. the activation code actually activated the account) — not the overall test status. Required (non-null) when requiresManualInput is true; must be null when it is false.',
                         },
                     },
-                    required: ['feature', 'file', 'status', 'summary'],
+                    required: ['feature', 'file', 'status', 'summary', 'requiresManualInput', 'manualStepOutcome'],
                     additionalProperties: false,
                 },
             },

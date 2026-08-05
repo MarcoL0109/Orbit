@@ -39,9 +39,11 @@ function resolveBrowserName(defaultBrowser: string): 'chromium' | 'firefox' | 'w
 // checkout -> payment) keeps its session — 'reset' is the only thing that
 // tears the context down and starts clean, left to the caller to invoke at
 // feature boundaries, not page boundaries.
-function buildBrowserWorkerSource(browserName: 'chromium' | 'firefox' | 'webkit'): string {
+function buildBrowserWorkerSource(browserName: 'chromium' | 'firefox' | 'webkit', baseUrl: string): string {
     return `import { ${browserName} as launchBrowser } from 'playwright';
 import readline from 'node:readline';
+
+const baseURL = ${JSON.stringify(baseUrl)};
 
 let browser = null;
 let context = null;
@@ -55,7 +57,7 @@ async function ensureBrowser() {
 
 async function ensurePage() {
   await ensureBrowser();
-  if (!context) context = await browser.newContext();
+  if (!context) context = await browser.newContext({baseURL});
   if (!page) page = await context.newPage();
   return page;
 }
@@ -105,7 +107,7 @@ async function handle(command) {
     case 'reset': {
       await ensureBrowser();
       if (context) await context.close();
-      context = await browser.newContext();
+      context = await browser.newContext({baseURL});
       page = null;
       lastSnapshot = null;
       return {ok: true};
@@ -147,12 +149,12 @@ rl.on('line', async (line) => {
 // Strictly sequential request/response over stdin/stdout — safe because the
 // agent loop only ever awaits one tool call at a time, so there's never more
 // than one in-flight command to correlate.
-export function spawnBrowserWorker(projectRoot: string, defaultBrowser: string): BrowserWorkerHandle {
+export function spawnBrowserWorker(projectRoot: string, defaultBrowser: string, baseUrl: string): BrowserWorkerHandle {
     const indexDir = path.join(projectRoot, '.orbit', 'index');
     fs.mkdirSync(indexDir, {recursive: true});
 
     const workerPath = path.join(indexDir, 'browser-worker.mjs');
-    fs.writeFileSync(workerPath, buildBrowserWorkerSource(resolveBrowserName(defaultBrowser)), 'utf8');
+    fs.writeFileSync(workerPath, buildBrowserWorkerSource(resolveBrowserName(defaultBrowser), baseUrl), 'utf8');
 
     const child = spawn(process.execPath, [workerPath], {cwd: projectRoot, stdio: ['pipe', 'pipe', 'pipe']});
 

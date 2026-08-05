@@ -188,6 +188,7 @@ Available Orbit commands:
                     orbitConfig,
                     signal: controller.signal,
                     requestApproval: context.requestApproval,
+                    requestInput: context.requestInput,
                 }, {
                     onProgress: (event) => context.setAgentActivity(describeAgentActivity(event)),
                 });

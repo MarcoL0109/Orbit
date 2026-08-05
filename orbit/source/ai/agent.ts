@@ -34,6 +34,7 @@ const ACTIVITY_LABEL: Record<string, string> = {
     run_test: 'Running the test...',
     report_result: 'Wrapping up...',
     browser_action: 'Exploring the page...',
+    request_user_input: 'Waiting for input...',
 };
 
 export function describeAgentActivity(event: AgentProgressEvent): string {
@@ -187,17 +188,21 @@ Project memory (read this before writing anything — avoid repeating documented
 
 ${summarizeMemory(memory)}
 
-If a run fails because of a broken selector or similar test-side issue, you may patch that feature's test file and run it again — you have a budget of ${context.orbitConfig.maxRepairAttempts} repair attempts per feature. If a run fails because of an actual application bug (not a problem with the test itself), do not keep patching it — report that feature as failed instead.
+If a run fails because of a broken selector or similar test-side issue, you may patch that feature's test file and run it again — you have a budget of ${context.orbitConfig.maxRepairAttempts} repair attempts per feature. If a run fails because of an actual application bug (not a problem with the test itself), do not keep patching it — report that feature as failed instead. This includes a bug you identified during exploration rather than from a run_test failure (see below): still write the test against the intended behavior and run it once, so the failure is backed by a real, reproducible Playwright result rather than only your own read of the page — but do not spend repair attempts on it once that run confirms it, since patching the test cannot fix a bug in the application. Report the feature as failed right away instead.
 
-Exploring with a real browser (browser_action): read_file shows you source code, not what actually renders — runtime data, conditional branches, and component-library internals can all make the real page different from what the source suggests. Use browser_action to ground your selectors and expected outcomes in what you actually observe, especially for anything read_file can't tell you: content behind a login, a multi-step flow with no direct URL per step, or a state that only appears after an interaction (a toast, a modal, a cart badge). navigate/click/fill already return the resulting accessibility snapshot whenever the page actually changed — you don't need to separately call snapshot after them. Call snapshot on its own only to re-check the current state without taking a new action. Call reset when you start exploring a NEW feature (fresh cookies/storage) — do not call it between pages within the same feature's flow, since a multi-page journey (e.g. cart -> checkout -> payment) depends on staying in the same browser context throughout.
+Exploring with a real browser (browser_action): the app runs at ${context.orbitConfig.baseUrl} — navigate accepts a path relative to that (e.g. "/SignUp") or a full URL. read_file shows you source code, not what actually renders — runtime data, conditional branches, and component-library internals can all make the real page different from what the source suggests. Use browser_action to ground your selectors and expected outcomes in what you actually observe, especially for anything read_file can't tell you: content behind a login, a multi-step flow with no direct URL per step, or a state that only appears after an interaction (a toast, a modal, a cart badge). navigate/click/fill already return the resulting accessibility snapshot whenever the page actually changed — you don't need to separately call snapshot after them. Call snapshot on its own only to re-check the current state without taking a new action. Call reset when you start exploring a NEW feature (fresh cookies/storage) — do not call it between pages within the same feature's flow, since a multi-page journey (e.g. cart -> checkout -> payment) depends on staying in the same browser context throughout. A sequence where a later step only makes sense because of what an earlier step just did — reset a password, then verify you can log in with that new password; sign up, then check the account shows as unactivated — is ONE feature, not two, even if the prompt describes it as a list of things to do in order. Only reset when moving to something genuinely independent of what you just verified, not for every checkpoint within one continuous journey. Keep in mind browser_action shows you what actually happens, not what's supposed to happen — if what you observe contradicts the feature description you were given or a documented convention in project memory, treat that as a possible application bug rather than writing an assertion that simply matches the broken behavior.
 
 Rules:
 - Prefer Playwright and role-based selectors (getByRole, getByLabel, getByText).
 - Use read_file to look at the actual markup of a component or route before writing selectors against it — do not guess. Use browser_action when you need to see what's actually rendered, not just what the source suggests.
+- Before asserting on the URL or page a user is redirected to after an action (a submit, a click), verify the actual destination with browser_action rather than inferring it from a component's name or file location — a component's name is not proof of its route. Guessing this costs a wasted repair attempt when it's wrong; browser_action gets you the real answer up front.
 - write_test_file only accepts paths inside the project's configured test directory (${context.orbitConfig.testDir}).
 - write_test_file's features argument: short, lowercase, dot-separated names (e.g. "checkout", "checkout.payment") — a broad feature and, where it genuinely applies, a specific sub-feature, matching the same convention used in the project index above. List every sub-feature the file covers if it groups more than one. Keep this accurate on every call, including repair retries — it's used for coverage tracking, not just documentation.
 - Do not invent project features you have not verified by reading a file.
 - Do not attempt to read or use any variables in a .env file.
+- If a flow needs something you have no way to obtain yourself (a code sent by email/SMS, a secret only the user has), use request_user_input to ask for it rather than guessing a value or skipping the step silently. The user may decline — if so, stop and report what you couldn't get past.
+- Only make request_user_input when you are stuck or cannot proceed without user's input. Do not ask for user input in advance without actually explored the browser and went through the steps
+- Do NOT call write_test_file or run_test for any feature where you used request_user_input, whether the user provided the value or declined. There is no safe automated version of this: a persisted test can never obtain a fresh one-time value on a future run, so it would either fail deterministically every time (nothing to fill it with) or — worse — replaying the steps to reach that point again repeats whatever real side effect they have (e.g. clicking "send code" really does send another real email, every single time the test runs, forever). Verify the flow live with browser_action only, then call report_result directly for that feature with file: null, status reflecting what you actually observed, requiresManualInput: true, and manualStepOutcome set to whether the manually-assisted step itself worked. State in the summary that no automated test was written and why.
 - Call report_result exactly once, when you are completely done with every feature, with one result entry per feature. Do not stop without calling it.`;
 }
 
@@ -231,10 +236,10 @@ function summarizeFeatureResults(results: FeatureResult[]): string {
 
 export async function runTestingAgent(
     prompt: string,
-    context: Omit<ToolContext, 'getBrowserWorker'>,
+    context: Omit<ToolContext, 'getBrowserWorker' | 'hasExploredWithBrowser' | 'hasUnconsumedManualInput'>,
     options: RunTestingAgentOptions = {},
 ): Promise<AgentRunResult> {
-    const maxSteps = options.maxSteps ?? 20;
+    const maxSteps = options.maxSteps ?? 40;
     const client = options.client ?? createOpenAIClient();
     const steps: AgentStep[] = [];
 
@@ -245,14 +250,18 @@ export async function runTestingAgent(
     // `let`, since a `let` reassigned only inside a nested closure confuses
     // TS's narrowing at the finally block below.
     const browserWorkerRef: {current: BrowserWorkerHandle | null} = {current: null};
+    const hasUsedBrowserActionRef: {current: boolean} = {current: false};
+    const manualInputPendingRef: {current: boolean} = {current: false};
     const toolContext: ToolContext = {
         ...context,
         getBrowserWorker: async () => {
             if (!browserWorkerRef.current || !browserWorkerRef.current.isAlive()) {
-                browserWorkerRef.current = spawnBrowserWorker(context.projectRoot, context.orbitConfig.defaultBrowser);
+                browserWorkerRef.current = spawnBrowserWorker(context.projectRoot, context.orbitConfig.defaultBrowser, context.orbitConfig.baseUrl);
             }
             return browserWorkerRef.current;
         },
+        hasExploredWithBrowser: () => hasUsedBrowserActionRef.current,
+        hasUnconsumedManualInput: () => manualInputPendingRef.current,
     };
 
     let previousResponseId: string | undefined;
@@ -307,12 +316,22 @@ export async function runTestingAgent(
                 steps.push({type: 'tool_call', name: call.name, args});
                 options.onProgress?.({name: call.name});
 
+                if (call.name === 'browser_action') {
+                    hasUsedBrowserActionRef.current = true;
+                }
+
                 const tool = findTool(call.name);
                 const result: ToolResult = tool
                     ? await tool.execute(args, toolContext)
                     : {ok: false, error: `Unknown tool: ${call.name}`};
 
                 steps.push({type: 'tool_result', name: call.name, result});
+
+                if (call.name === 'request_user_input' && result.ok) {
+                    manualInputPendingRef.current = true;
+                } else if (call.name === 'browser_action' && result.ok && (args as {action?: string}).action === 'fill') {
+                    manualInputPendingRef.current = false;
+                }
 
                 outputItems.push({
                     type: 'function_call_output',
@@ -421,17 +440,23 @@ export function formatAgentRunResult(result: AgentRunResult): string {
     const runResultsByFile = collectRunResultsByFile(result.steps);
 
     const featureBlocks = result.results.map((feature) => {
-        const run = runResultsByFile.get(feature.file);
+        const run = feature.file ? runResultsByFile.get(feature.file) : undefined;
         const testsText = run
             ? `${run.result.passedCount}/${run.result.totalTests} passed (${run.result.durationMs}ms)`
-            : 'not run';
+            : feature.file
+                ? 'not run'
+                : 'verified live, no automated test';
         const attemptsText = run && run.attempts > 1 ? `, ${run.attempts} attempts` : '';
 
         const testListText = run && run.result.tests.length > 0
             ? '\n' + formatTestList(run.result.tests, run.result.failures)
             : '';
 
-        return `${FEATURE_STATUS_ICON[feature.status]} ${feature.feature} (${feature.file}) — ${testsText}${attemptsText}
+        const manualTag = feature.requiresManualInput
+            ? ` [manual step ${feature.manualStepOutcome ?? 'unknown'} — not unattended-repeatable]`
+            : '';
+
+        return `${FEATURE_STATUS_ICON[feature.status]} ${feature.feature} (${feature.file ?? 'no test file'})${manualTag} — ${testsText}${attemptsText}
     ${feature.summary}${testListText}`;
     });
 
