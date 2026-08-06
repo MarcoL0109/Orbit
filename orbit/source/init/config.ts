@@ -12,6 +12,13 @@ export type OrbitConfig = {
     devCommand: string | null;
     testCommand: string | null;
     testDir: string;
+    // Where a record of a feature that needed request_user_input gets
+    // written — a .md summary, not a runnable test, since there's nothing
+    // to execute unattended for these (see write_test_file/report_result's
+    // rules). Independent of testDir rather than derived from it, so it
+    // stays predictable even if testDir is customized to something not
+    // shaped like "Orbit_test/e2e".
+    manualTestDir: string;
     writeMode: ApprovalMode;
     maxRepairAttempts: number;
     // Detected at /init — facts only, no strategy decided from them yet.

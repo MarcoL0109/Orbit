@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { AgentRunResult } from './agent.js';
+import type { FeatureResult } from './tools/reportResult.js';
+import type { OrbitConfig } from '../init/config.js';
 
 export function writeAgentSession(projectRoot: string, prompt: string, result: AgentRunResult): string {
     const sessionsDir = path.join(projectRoot, '.orbit', 'sessions');
@@ -11,4 +13,43 @@ export function writeAgentSession(projectRoot: string, prompt: string, result: A
 
     fs.writeFileSync(sessionPath, JSON.stringify({prompt, ...result}, null, 2), 'utf8');
     return sessionPath;
+}
+
+function sanitizeFeatureFilename(feature: string): string {
+    return feature.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+// One .md record per manual-input feature, overwritten on each run rather
+// than accumulated — same "latest write wins" behavior as the actual .spec
+// files write_test_file produces. Not a runnable test: these features never
+// get one (see write_test_file's rules), so there's nothing to execute —
+// this is a human-readable record of what was verified live and how it went.
+export function writeManualInputTestRecords(
+    projectRoot: string,
+    orbitConfig: OrbitConfig,
+    results: FeatureResult[],
+): string[] {
+    const manualResults = results.filter((result) => result.requiresManualInput);
+    if (manualResults.length === 0) return [];
+
+    const manualTestDir = path.resolve(projectRoot, orbitConfig.manualTestDir);
+    fs.mkdirSync(manualTestDir, {recursive: true});
+
+    const now = new Date().toISOString();
+
+    return manualResults.map((result) => {
+        const filePath = path.join(manualTestDir, `${sanitizeFeatureFilename(result.feature)}.md`);
+        const content = `# ${result.feature}
+
+- Status: ${result.status}
+- Manual step outcome: ${result.manualStepOutcome ?? 'unknown'}
+- Verified: ${now}
+
+## Summary
+
+${result.summary}
+`;
+        fs.writeFileSync(filePath, content, 'utf8');
+        return filePath;
+    });
 }

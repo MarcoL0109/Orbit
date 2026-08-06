@@ -2,7 +2,7 @@ import type { CommandContext } from "./context.js";
 import {readGlobalProjects, formatProjectsForTui} from '../registry/knownProjects.js';
 import { getProjectDisplayName } from "../projects/search.js";
 import { runTestingAgent, formatAgentRunResult, describeAgentActivity } from '../ai/agent.js';
-import { writeAgentSession } from '../ai/session.js';
+import { writeAgentSession, writeManualInputTestRecords } from '../ai/session.js';
 import { readOrbitConfig } from '../init/config.js';
 import {scanProject, writeProjectMap} from '../projects/scan.js';
 import { getProjectPath } from '../init/deinit.js';
@@ -194,6 +194,7 @@ Available Orbit commands:
                 });
 
                 writeAgentSession(context.project.root, prompt, result);
+                writeManualInputTestRecords(context.project.root, orbitConfig, result.results);
 
                 context.setMessages((prev) => [
                     ...prev,
