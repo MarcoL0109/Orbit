@@ -20,7 +20,7 @@ export function findTool(name: string): ToolDefinition | undefined {
     return toolRegistry.find((tool) => tool.name === name);
 }
 
-export function toApiToolSchema(tool: ToolDefinition): FunctionTool {
+export function toApiToolSchema(tool: ToolDefinition<any, any, any>): FunctionTool {
     return {
         type: 'function',
         name: tool.name,

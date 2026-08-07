@@ -19,7 +19,11 @@ type ReadFileData = {
 // and path.ts each keep locally for their own equivalent purpose.
 const CLASSIFIABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs']);
 
-export const readFileTool: ToolDefinition<ReadFileArgs, ReadFileData> = {
+// Only ever touches projectRoot/signal — declared against that minimal
+// shape rather than the full ToolContext, so it can be reused as-is by any
+// agent whose context has at least those two fields (see the environment
+// setup agent, whose context is much smaller than ToolContext).
+export const readFileTool: ToolDefinition<ReadFileArgs, ReadFileData, {projectRoot: string; signal: AbortSignal}> = {
     name: 'read_file',
     description:
         'Read the contents of a file within the project, given a path relative to the project root. Use this to inspect a component or route before writing a test against it.',

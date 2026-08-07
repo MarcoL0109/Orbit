@@ -38,6 +38,16 @@ export type ToolContext = {
     getBrowserWorker: () => Promise<BrowserWorkerHandle>;
 };
 
+// Deliberately smaller than ToolContext — the environment setup agent's
+// tools (run_command, signal_environment_ready) have no use for
+// browser/manual-input state, so they don't get fields that don't apply.
+export type EnvironmentSetupContext = {
+    projectRoot: string;
+    orbitConfig: OrbitConfig;
+    signal: AbortSignal;
+    requestApproval: (description: string) => Promise<boolean>;
+};
+
 // A minimal JSON Schema object — only what's needed to describe a tool's
 // parameters to the model, not a general-purpose schema type.
 //
@@ -53,9 +63,12 @@ export type JsonSchema = {
     required?: string[];
 };
 
-export type ToolDefinition<Args = any, Data = any> = {
+// Ctx defaults to ToolContext so every existing tool (testing-agent tools)
+// needs no changes — only a tool family with a genuinely different, smaller
+// context (see the environment setup agent's tools) specifies it explicitly.
+export type ToolDefinition<Args = any, Data = any, Ctx = ToolContext> = {
     name: string;
     description: string;
     parameters: JsonSchema;
-    execute: (args: Args, context: ToolContext) => Promise<ToolResult<Data>>;
+    execute: (args: Args, context: Ctx) => Promise<ToolResult<Data>>;
 };

@@ -43,8 +43,19 @@ export function App({ initialPrompt }: AppProps) {
 	const [pendingInputValue, setPendingInputValue] = useState<string>("");
 	const [agentActivity, setAgentActivity] = useState<string | null>(null);
 	const currentAbortControllerRef = useRef<AbortController | null>(null);
+	const readyEnvironmentsRef = useRef<Set<string>>(new Set());
 	const ghostCompletetion = getGhostCompletion(query);
 	const confirmationOptions = [{label: "Confirm", value: "confirm"}, {label: "Cancel", value: "cancel"}]
+
+
+	function isEnvironmentReady(projectRoot: string): boolean {
+		return readyEnvironmentsRef.current.has(projectRoot);
+	}
+
+
+	function markEnvironmentReady(projectRoot: string): void {
+		readyEnvironmentsRef.current.add(projectRoot);
+	}
 
 
 	useInput((_input, key) => {
@@ -198,11 +209,13 @@ export function App({ initialPrompt }: AppProps) {
 		: 'None';
 	
 		return `Orbit initialized this project.
-	
+
 Created:
 ${createdText}
 Skipped:
 ${skippedText}
+
+Tip: if this project's dev environment needs a specific startup sequence, describe it in .orbit/memory/environment_setup.md and Orbit will follow it directly. Leave it empty and Orbit will work it out itself the first time — and write down what it learned there for next time.
 `;
 	}
 
@@ -241,6 +254,8 @@ ${skippedText}
 			requestApproval,
 			requestInput,
 			setAgentActivity,
+			isEnvironmentReady,
+			markEnvironmentReady,
 		});
 
 		if (commandHandled) {

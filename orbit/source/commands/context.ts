@@ -44,4 +44,12 @@ export type CommandContext = {
     requestApproval: (description: string) => Promise<boolean>;
     requestInput: (prompt: string) => Promise<string | null>;
     setAgentActivity: React.Dispatch<React.SetStateAction<string | null>>;
+    // Keyed by project root, not a single flag — switching projects (/switch)
+    // shouldn't let one project's confirmed-ready state apply to another.
+    // Set once per project per session; never cleared or re-checked after
+    // that (see the /test wiring) — a crashed dev server mid-session means
+    // the next /test just fails against an unreachable baseUrl rather than
+    // auto-recovering, a deliberate tradeoff, not an oversight.
+    isEnvironmentReady: (projectRoot: string) => boolean;
+    markEnvironmentReady: (projectRoot: string) => void;
 };

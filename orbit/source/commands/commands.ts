@@ -2,12 +2,16 @@ import type { CommandContext } from "./context.js";
 import {readGlobalProjects, formatProjectsForTui} from '../registry/knownProjects.js';
 import { getProjectDisplayName } from "../projects/search.js";
 import { runTestingAgent, formatAgentRunResult, describeAgentActivity } from '../ai/agent.js';
+import { runEnvironmentSetupAgent } from '../ai/environmentSetupAgent.js';
 import { writeAgentSession, writeManualInputTestRecords } from '../ai/session.js';
 import { readOrbitConfig } from '../init/config.js';
+import { readEnvironmentSetupInstructions, writeEnvironmentSetupInstructions } from '../init/memory.js';
 import {scanProject, writeProjectMap} from '../projects/scan.js';
 import { getProjectPath } from '../init/deinit.js';
 import { formatScanResult } from "../projects/scan.js";
 import { computeCoverage, formatCoverageSummary, describeCoverageEntry, colorForCoverageStatus, type CoverageEntry } from '../projects/coverage.js';
+import { isReachable, waitUntilReachable } from '../projects/reachability.js';
+import { cleanupTrackedProcesses } from '../projects/processTracking.js';
 import { reportError, type ArgCountRule } from './error.js';
 
 
@@ -113,6 +117,7 @@ Available Orbit commands:
         usage: '/exit',
         argsRule: {exact: 0},
         handler: (_args, _context) => {
+            cleanupTrackedProcesses();
             process.exit(0);
         },
     },
@@ -164,6 +169,99 @@ Available Orbit commands:
             try {
                 context.setIsThinking(true);
                 const controller = context.startAbortableTask();
+
+                // Runs at most once per project per session — see
+                // CommandContext.isEnvironmentReady's own note on why a
+                // crash mid-session isn't auto-recovered from.
+                if (!context.isEnvironmentReady(context.project.root)) {
+                    const alreadyReachable = await isReachable(orbitConfig.baseUrl);
+
+                    if (alreadyReachable) {
+                        context.markEnvironmentReady(context.project.root);
+                    } else {
+                        // Give the user a chance to hand-write the startup
+                        // sequence before defaulting to AI discovery — they
+                        // usually already know it (they built the project),
+                        // and typing it out is far faster than the agent
+                        // rediscovering it live through trial and error.
+                        // requestInput here is just a "press Enter when
+                        // you're done editing the file" gate, not a text
+                        // collector — a multi-line shell recipe doesn't
+                        // belong typed into the single-line TextInput it
+                        // renders (see app.tsx), so the actual editing
+                        // happens in the user's own editor against the file
+                        // directly.
+                        if (readEnvironmentSetupInstructions(context.project.root) === null) {
+                            await context.requestInput(
+                                `No dev environment startup instructions found. Add them to .orbit/memory/environment_setup.md now, then press Enter to continue — or just press Enter to let Orbit figure it out itself instead (slower, first run only).`,
+                            );
+                        }
+
+                        context.setAgentActivity('Setting up the dev environment...');
+
+                        // Captured after the pause above, not before — this
+                        // reflects whatever the user actually did (wrote
+                        // their own file, or skipped) rather than stale
+                        // pre-prompt state, and is what decides whether a
+                        // returned setupProcedure gets persisted below. A
+                        // file the user just hand-wrote is never overwritten
+                        // by the agent's own reconstruction of it.
+                        const hadDocumentedInstructions = readEnvironmentSetupInstructions(context.project.root) !== null;
+
+                        const setupResult = await runEnvironmentSetupAgent({
+                            projectRoot: context.project.root,
+                            orbitConfig,
+                            signal: controller.signal,
+                            requestApproval: context.requestApproval,
+                        }, {
+                            onProgress: (event) => context.setAgentActivity(describeAgentActivity(event)),
+                        });
+
+                        if (setupResult.status === 'aborted') {
+                            context.setMessages((prev) => [
+                                ...prev,
+                                {role: 'agent', content: `Aborted: ${setupResult.notes}`, color: 'yellow'},
+                            ]);
+                            return;
+                        }
+
+                        if (setupResult.status === 'gave_up') {
+                            reportError(context.setMessages, {kind: 'environment-setup-gave-up', notes: setupResult.notes});
+                            return;
+                        }
+
+                        // status === 'signaled' — its own belief is never
+                        // trusted as proof; verify independently. Retried
+                        // over a short window, not a single check: a
+                        // service that was just told to start can take a
+                        // few seconds to actually bind its port after the
+                        // start command itself has already returned.
+                        context.setAgentActivity('Confirming the environment is reachable...');
+                        const nowReachable = await waitUntilReachable(orbitConfig.baseUrl);
+                        if (!nowReachable) {
+                            reportError(context.setMessages, {
+                                kind: 'environment-not-reachable',
+                                baseUrl: orbitConfig.baseUrl,
+                                notes: setupResult.notes,
+                            });
+                            return;
+                        }
+
+                        // Only ever writes a file the agent had to
+                        // discover from scratch — never overwrites one that
+                        // was already there to follow, and never writes on
+                        // a self-report that reachability then contradicted.
+                        if (!hadDocumentedInstructions && setupResult.setupProcedure) {
+                            writeEnvironmentSetupInstructions(context.project.root, setupResult.setupProcedure);
+                            context.setMessages((prev) => [
+                                ...prev,
+                                {role: 'agent', content: 'Saved the setup steps it discovered to .orbit/memory/environment_setup.md for next time.', color: 'gray'},
+                            ]);
+                        }
+
+                        context.markEnvironmentReady(context.project.root);
+                    }
+                }
 
                 // Keep the project index fresh before every run — cheap in
                 // practice since scanProject skips unchanged files by

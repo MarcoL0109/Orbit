@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { Response, ResponseFunctionToolCall, ResponseInputItem } from 'openai/resources/responses/responses';
+import type { ResponseInputItem } from 'openai/resources/responses/responses';
 import { createOpenAIClient, type ResponsesClient } from './client.js';
-import { toolRegistry, findTool, toApiToolSchema, type ToolContext, type ToolResult } from './tools/index.js';
+import { toolRegistry, type ToolContext } from './tools/index.js';
 import { spawnBrowserWorker, type BrowserWorkerHandle } from './browserWorker.js';
+import { runAgentTurn, type AgentStep, type AgentProgressEvent, type AgentTurnResult } from './agentLoop.js';
 import type { ReportResultArgs, FeatureResult } from './tools/reportResult.js';
 import type { RunTestResult, TestOutcome, TestStatus, TestFailureDetail } from './tools/runTest.js';
 import { readProjectMap, type ProjectMap } from '../projects/scan.js';
@@ -12,10 +13,7 @@ import { readFeatureClassifications } from '../projects/featureClassification.js
 import { checksumFromContent } from '../projects/checksum.js';
 
 export type { ResponsesClient } from './client.js';
-
-export type AgentStep =
-    | {type: 'tool_call'; name: string; args: unknown}
-    | {type: 'tool_result'; name: string; result: ToolResult};
+export type { AgentStep, AgentProgressEvent } from './agentLoop.js';
 
 export type AgentRunResult = {
     status: 'passed' | 'failed' | 'gave_up' | 'aborted';
@@ -23,10 +21,6 @@ export type AgentRunResult = {
     results: FeatureResult[];
     steps: AgentStep[];
 };
-
-// Fired as each tool call starts, so the UI can show something more useful
-// than a static "thinking" spinner while the loop runs.
-export type AgentProgressEvent = {name: string};
 
 const ACTIVITY_LABEL: Record<string, string> = {
     read_file: 'Reading project files...',
@@ -206,20 +200,6 @@ Rules:
 - Call report_result exactly once, when you are completely done with every feature, with one result entry per feature. Do not stop without calling it.`;
 }
 
-function parseToolArguments(raw: string): unknown {
-    try {
-        return JSON.parse(raw);
-    } catch {
-        return {};
-    }
-}
-
-function extractFunctionCalls(response: Response): ResponseFunctionToolCall[] {
-    return response.output.filter(
-        (item): item is ResponseFunctionToolCall => item.type === 'function_call',
-    );
-}
-
 // The model reports one status per feature, not one for the whole run — the
 // overall status is derived rather than declared, so it can't disagree with
 // the individual results.
@@ -287,74 +267,54 @@ export async function runTestingAgent(
             const knownClassifications = summarizeKnownClassifications(context.projectRoot);
             const testsWrittenThisRun = collectTestsWrittenThisRun(steps, context.projectRoot);
 
-            const response = await client.responses.create({
+            const turn: AgentTurnResult = await runAgentTurn<ToolContext>({
+                client,
                 model: 'gpt-5.2',
                 instructions: buildSystemPrompt(toolContext, projectMap, memory, knownClassifications, testsWrittenThisRun),
                 input: nextInput,
-                previous_response_id: previousResponseId,
-                tools: toolRegistry.map(toApiToolSchema),
-            }, {signal: context.signal});
+                previousResponseId,
+                toolRegistry,
+                context: toolContext,
+                signal: context.signal,
+                steps,
+                onProgress: options.onProgress,
+                onToolDispatched: (name) => {
+                    if (name === 'browser_action') {
+                        hasUsedBrowserActionRef.current = true;
+                    }
+                },
+                onToolResult: (name, args, result) => {
+                    if (name === 'request_user_input' && result.ok) {
+                        manualInputPendingRef.current = true;
+                    } else if (name === 'browser_action' && result.ok && (args as {action?: string}).action === 'fill') {
+                        manualInputPendingRef.current = false;
+                    }
+                },
+            });
 
-            previousResponseId = response.id;
+            previousResponseId = turn.responseId;
 
-            const functionCalls = extractFunctionCalls(response);
-
-            if (functionCalls.length === 0) {
+            if (turn.functionCalls.length === 0) {
                 return {
                     status: 'gave_up',
-                    summary: response.output_text || 'Agent stopped without reporting a result',
+                    summary: turn.outputText || 'Agent stopped without reporting a result',
                     results: [],
                     steps,
                 };
             }
 
-            const outputItems: ResponseInputItem[] = [];
-            let finalResult: AgentRunResult | null = null;
-
-            for (const call of functionCalls) {
-                const args = parseToolArguments(call.arguments);
-                steps.push({type: 'tool_call', name: call.name, args});
-                options.onProgress?.({name: call.name});
-
-                if (call.name === 'browser_action') {
-                    hasUsedBrowserActionRef.current = true;
-                }
-
-                const tool = findTool(call.name);
-                const result: ToolResult = tool
-                    ? await tool.execute(args, toolContext)
-                    : {ok: false, error: `Unknown tool: ${call.name}`};
-
-                steps.push({type: 'tool_result', name: call.name, result});
-
-                if (call.name === 'request_user_input' && result.ok) {
-                    manualInputPendingRef.current = true;
-                } else if (call.name === 'browser_action' && result.ok && (args as {action?: string}).action === 'fill') {
-                    manualInputPendingRef.current = false;
-                }
-
-                outputItems.push({
-                    type: 'function_call_output',
-                    call_id: call.call_id,
-                    output: JSON.stringify(result),
-                });
-
-                if (call.name === 'report_result' && result.ok) {
-                    const data = result.data as ReportResultArgs;
-                    finalResult = {
-                        status: deriveOverallStatus(data.results),
-                        summary: summarizeFeatureResults(data.results),
-                        results: data.results,
-                        steps,
-                    };
-                }
+            const reportCall = turn.dispatchedCalls.find((call) => call.name === 'report_result');
+            if (reportCall && reportCall.result.ok) {
+                const data = reportCall.result.data as ReportResultArgs;
+                return {
+                    status: deriveOverallStatus(data.results),
+                    summary: summarizeFeatureResults(data.results),
+                    results: data.results,
+                    steps,
+                };
             }
 
-            if (finalResult) {
-                return finalResult;
-            }
-
-            nextInput = outputItems;
+            nextInput = turn.outputItems;
         }
 
         return {

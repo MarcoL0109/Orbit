@@ -9,7 +9,12 @@ export type OrbitConfig = {
     approvalMode: ApprovalMode;
     defaultBrowser: string;
     baseUrl: string;
-    devCommand: string | null;
+    // Each entry is spawned as its own independent long-running process, not
+    // chained together — bringing a dev stack up often means several things
+    // that each run forever (docker compose up, a backend's own dev server)
+    // rather than one command that completes before the next starts. Empty
+    // when nothing was auto-detected and nothing has been configured.
+    devCommands: string[];
     testCommand: string | null;
     testDir: string;
     // Where a record of a feature that needed request_user_input gets

@@ -211,7 +211,7 @@ export function initOrbitProject({
       approvalMode: 'ask',
       defaultBrowser: 'chromium',
       baseUrl: `http://localhost:${detectDevServerPort(projectRoot, dockerCompose)}`,
-      devCommand: dockerCompose.file ? 'docker compose up' : null,
+      devCommands: dockerCompose.file ? ['docker compose up'] : [],
       testCommand: null,
       testDir: 'Orbit_test/e2e',
       manualTestDir: 'Orbit_test/user_input_test',
@@ -269,6 +269,18 @@ Orbit will record useful test failure patterns here.
 Do not store secrets, passwords, tokens, or full raw logs.
 `,
     ),
+
+    // Deliberately created empty, not pre-filled with placeholder/example
+    // prose: readEnvironmentSetupInstructions treats ANY non-empty file as
+    // user-documented instructions to follow directly instead of exploring
+    // — a non-empty default here would mean every freshly-init'd project
+    // looks "already documented" from the start, which both feeds the
+    // agent a generic example that doesn't match this specific project and
+    // permanently blocks the environment setup agent's own write-back
+    // (commands.ts only writes its discovered procedure here when this
+    // file was empty beforehand). The guidance for what to put here lives
+    // in the init summary message instead of the file itself.
+    writeTextIfMissing(projectRoot, path.join(memoryDir, 'environment_setup.md'), ''),
   ];
 
   return {

@@ -4,7 +4,19 @@ import React from 'react';
 import { render } from 'ink';
 import { Command } from 'commander';
 import { App } from './app.js';
+import { cleanupTrackedProcesses } from './projects/processTracking.js';
 import 'dotenv/config';
+
+// Safety net for abrupt termination (Ctrl-C, a parent process killing this
+// one) — /exit's own handler covers the graceful path, but a dev server
+// run_command started shouldn't be left orphaned just because the CLI
+// itself didn't shut down cleanly.
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    cleanupTrackedProcesses();
+    process.exit(0);
+  });
+}
 
 const program = new Command();
 

@@ -13,6 +13,16 @@ export type OrbitError =
     | {kind: 'project-already-initialized'}
     | {kind: 'project-not-initialized'}
     | {kind: 'post-init-scan-failed'; cause: unknown}
+    // The environment setup agent never called signal_environment_ready —
+    // ran out of steps, or genuinely couldn't proceed (e.g. a needed
+    // command was declined). Distinct from the case below: this means it
+    // never believed it finished at all.
+    | {kind: 'environment-setup-gave-up'; notes: string}
+    // It called signal_environment_ready, but the independent reachability
+    // check afterward still failed — it believed it was done and was
+    // wrong. Kept separate from the above since "confidently wrong" is a
+    // more actionable signal than "never got there."
+    | {kind: 'environment-not-reachable'; baseUrl: string; notes: string}
     | {kind: 'unexpected'; action: string; cause: unknown};
 
 export type ArgCountRule = {exact: number} | {min: number};
@@ -41,6 +51,10 @@ Type /help to see available commands.`;
             return 'This project has no Orbit context yet. Run /init first.';
         case 'post-init-scan-failed':
             return `Project initialized, but the initial scan failed: ${causeMessage(error.cause)}`;
+        case 'environment-setup-gave-up':
+            return `Couldn't get the dev environment running: ${error.notes}`;
+        case 'environment-not-reachable':
+            return `The setup agent believed it finished, but ${error.baseUrl} still isn't reachable. What it did: ${error.notes}`;
         case 'unexpected':
             return `${error.action} failed: ${causeMessage(error.cause)}`;
     }

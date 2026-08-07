@@ -48,3 +48,22 @@ export function readProjectMemory(projectRoot: string): ProjectMemory {
         failures: readMemoryFile(projectRoot, 'failures.md'),
     };
 }
+
+// Kept separate from ProjectMemory rather than folded into it — this file
+// is specific to the environment setup agent (user-authored, exact startup
+// commands to follow directly), not general testing context, so it's read
+// and injected into a different agent's prompt entirely.
+export function readEnvironmentSetupInstructions(projectRoot: string): string | null {
+    return readMemoryFile(projectRoot, 'environment_setup.md');
+}
+
+// Called only when the environment setup agent had no instructions to
+// follow and worked the sequence out itself — see commands.ts, which only
+// calls this when readEnvironmentSetupInstructions returned null before the
+// run, so a human-authored file is never overwritten by the agent's own
+// reconstruction of it.
+export function writeEnvironmentSetupInstructions(projectRoot: string, content: string): void {
+    const dir = getMemoryDir(projectRoot);
+    fs.mkdirSync(dir, {recursive: true});
+    fs.writeFileSync(path.join(dir, 'environment_setup.md'), content.trim() + '\n', 'utf8');
+}
