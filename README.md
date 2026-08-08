@@ -1,638 +1,181 @@
 # Orbit
 
-Orbit is an interactive CLI AI QA agent for scanning projects, understanding application structure, and helping generate, run, and improve end-to-end tests.
-
-It is designed to work from your terminal, inside your project directory, with a focus on Playwright-based E2E testing.
+Orbit is an interactive terminal AI QA agent. Point it at a project, describe a feature in plain English, and it writes a real Playwright test for it, runs the test, repairs it if the selectors were wrong, and tells you whether the feature actually works — reading source, exploring with a real browser, and starting your dev environment for you along the way.
 
 ```txt
 🪐 Orbit
 AI QA agent for project scanning, test planning, and E2E automation
 ```
 
-## What Orbit Does
+## What Orbit does
 
-Orbit helps developers:
+* Detects and initializes a project, remembering it globally
+* Scans the codebase for routes, components, tests, and configuration
+* Writes and runs Playwright E2E tests for a feature you describe in plain English
+* Explores your app live in a real browser to ground tests in what actually renders, not just what the source implies
+* Starts your dev environment itself — Docker, migrations, dev servers — when it isn't already running
+* Distinguishes a real application bug from its own test-writing mistake, using the actual network/console evidence, not a guess
+* Repairs a broken test automatically, but stops and reports a real bug instead of endlessly patching around one
+* Asks for your help on anything it has no way to do itself (a 2FA code, an email verification link)
+* Keeps a per-project knowledge graph (optional, via [graphify](https://github.com/Graphify-Labs/graphify)) so it can understand how code connects without opening every file
+* Tracks feature coverage — which routes and components have a matching test and which don't
 
-* Detect and initialize a project
-* Create local Orbit context in `.orbit/`
-* Scan source files, routes, commands, tests, configs, and project structure
-* Remember initialized projects globally
-* Use AI to reason about testing tasks
-* Generate practical E2E testing ideas
-* Maintain project-specific QA memory
-* Refresh project context when the codebase changes
-
-Orbit is built as a terminal-first tool, similar in spirit to coding agents like Claude Code, but focused on QA workflows.
+Every file write, shell command, and test run is approval-gated by default — you see exactly what Orbit is about to do before it does it.
 
 ## Installation
-
-Clone the repository:
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/orbit.git
 cd orbit
-```
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-Build the CLI:
-
-```bash
-npm run build
-```
-
-Run the installer:
-
-```bash
 ./install.sh
 ```
 
-After installation, Orbit can be run from anywhere:
+This installs dependencies, builds the CLI, and adds `orbit` to your `PATH` (via `~/.orbit/bin`). Restart your terminal, then run `orbit` from inside any project.
+
+You'll need an OpenAI API key — either exported as `OPENAI_API_KEY`, or in a `.env` file in Orbit's own directory during development.
+
+## Quick start
 
 ```bash
+cd ~/Documents/GitHub/your-app
 orbit
 ```
 
-During development, run Orbit directly with:
-
-```bash
-npm run dev
+```txt
+/init
 ```
 
-## Global Orbit Directory
-
-Orbit creates a global home directory at:
+Detects your framework, package manager, and test setup; scans the project; and remembers it globally.
 
 ```txt
-~/.orbit/
+/test the login flow
 ```
 
-This stores user-level Orbit data.
-
-Example structure:
+Orbit figures out how to bring your dev environment up if it isn't already running, explores the login page with a real browser, writes a Playwright test, runs it, and reports what passed and what didn't.
 
 ```txt
-~/.orbit/
-  bin/
-    orbit
-  config.json
-  projects.json
-  memory/
-    preferences.md
-  logs/
-  cache/
-  tmp/
+/coverage
 ```
 
-### `~/.orbit/bin/`
+Shows which routes and components still have no test at all.
 
-Contains the global `orbit` executable wrapper.
+## Commands
 
-### `~/.orbit/config.json`
+| Command | What it does |
+|---|---|
+| `/init` | Create `.orbit/` context for the current project and run an initial scan |
+| `/test <description>` | Generate and run a Playwright test for the feature you describe |
+| `/scan` | Refresh the project index (routes, components, tests, config) |
+| `/coverage` | List routes/components with no matching test |
+| `/projects` | Show every project Orbit has been initialized in |
+| `/switch` | Switch Orbit to a different project |
+| `/abort` (aliases: `/cancel`, `/stop`) | Abort the current running task |
+| `/deinit` | Remove `.orbit/` context and forget the project |
+| `/clear` | Clear the terminal screen |
+| `/help` | List available commands |
+| `/exit` | Exit Orbit, cleaning up any process it started itself |
 
-Stores global Orbit settings.
+## How `/test` actually works
 
-Example:
+`/test` runs an agent loop backed by GPT-5.2 with a fixed set of tools:
 
-```json
-{
-  "version": 1,
-  "approvalMode": "ask",
-  "defaultBrowser": "chromium",
-  "defaultModel": "gpt-5.2",
-  "telemetry": false,
-  "lastOpenedProject": null
-}
-```
+* **`read_file`** — read a file relative to the project root
+* **`explain_symbol`** — look up a function, component, or file in the project's knowledge graph and see exactly what it calls, what calls it, and what imports it, without opening the file (only available in graphify scan mode — see below)
+* **`browser_action`** — drive a real, persistent Playwright browser: navigate, click, fill, snapshot the accessibility tree, or reset to a clean session. Every response also carries any failed network requests (with status and body) and console errors that happened during that action, so the agent can tell a real backend bug apart from its own bad selector instead of guessing from a blank screen
+* **`write_test_file`** — write a Playwright spec into your configured test directory
+* **`run_test`** — run a spec (or the whole suite) and get back structured pass/fail results
+* **`request_user_input`** — ask you directly for something it has no way to obtain itself (a code sent by email, a secret only you have). It only asks after it has already tried exploring live with the browser first, and a feature that needed this is recorded as verified-but-not-automated rather than turned into a test that would silently repeat a real side effect (like re-sending an email) every time it ran
+* **`report_result`** — report one pass/fail result per feature, with a summary
 
-### `~/.orbit/projects.json`
+Before writing a fix, the agent reads real markup and watches the real page, not just the source — and it's told explicitly to tell a genuine application bug apart from its own mistake using the browser's network/console evidence, rather than inferring one from silence. A repair budget (`maxRepairAttempts`, default 3) caps how many times it'll patch a failing test before giving up and reporting the feature as failed.
 
-Stores initialized projects remembered by Orbit.
+## Starting your dev environment automatically
 
-Initial content:
+If your app isn't already reachable at the configured `baseUrl` when you run `/test`, Orbit brings it up itself before testing anything — a separate agent reads your README/config files (or `.orbit/memory/environment_setup.md`, if you've written one) and runs whatever shell commands are needed (`docker compose up`, migrations, dev servers), asking your approval for every single command first. It never trusts its own "I think it's ready" — reachability is independently re-verified afterward.
 
-```json
-{
-  "projects": []
-}
-```
+The first time it has to work this out from scratch, it writes down what it learned to `.orbit/memory/environment_setup.md`, so the next session's first `/test` doesn't have to rediscover it. If you'd rather write that file yourself, Orbit will pause and give you the chance before it starts guessing — your instructions are always followed directly, and it still repairs its own way through anything that turns out to be wrong or incomplete in them.
 
-After projects are initialized, it may look like:
+Orbit brings infrastructure up but never tears it down on its own — it's left running for reuse across multiple `/test` runs in the same session. Run `docker compose down` yourself when you're done with it.
 
-```json
-{
-  "projects": [
-    {
-      "name": "shop-app",
-      "path": "/Users/marcolau/Documents/GitHub/shop-app",
-      "framework": "Next.js",
-      "packageManager": "pnpm",
-      "testFramework": "Playwright",
-      "lastOpenedAt": "2026-07-14T10:36:00.000Z",
-      "lastScannedAt": "2026-07-14T10:36:00.000Z",
-      "openCount": 1
-    }
-  ]
-}
-```
+## Scanning strategy
 
-## Local Project Orbit Directory
+Every `/test` and `/scan` keeps a project index fresh. There are two scan modes, chosen once per project (the choice is remembered — you're only asked the first time):
 
-When Orbit is initialized inside a project, it creates:
+* **Regex** — a fast, dependency-free heuristic scan: walks the file tree, classifies files by role (route, component, test, config, ...), and detects Next.js/SvelteKit/Remix-style routes by filename convention. Always available.
+* **Graphify** — builds an actual AST-based code knowledge graph via [graphify](https://github.com/Graphify-Labs/graphify) (tree-sitter under the hood, no LLM calls for the base extraction). This is what powers the `explain_symbol` tool. If graphify isn't installed when you pick this mode, Orbit offers to install it (`uv`/`pipx`/`pip`, whichever's available) — with your approval first.
+
+Either way, the regular scan still runs — graphify mode adds to it, it never replaces it.
+
+## `.orbit/` — per-project context
 
 ```txt
 <project>/.orbit/
+  project.json          # name, root, framework, package manager, test framework
+  config.json            # see Configuration below
+  index/
+    project-map.json     # routes, components, tests, config files — from the last /scan
+    checksums.json        # used to skip re-scanning unchanged files
+    browser-worker.mjs    # generated Playwright worker script (regenerated each run)
+  memory/
+    overview.md            # project notes, edit freely
+    decisions.md            # testing conventions Orbit should follow
+    failures.md              # known failure patterns
+    environment_setup.md      # exact dev-environment startup steps, yours or self-discovered
+  sessions/               # one JSON record per /test run
+  traces/
 ```
 
-Example:
+`graphify-out/` (graph.json, GRAPH_REPORT.md, etc.) is written at your project root, not inside `.orbit/`, since that's where graphify's own incremental caching expects it to live — Orbit adds it to your `.gitignore` automatically.
 
-```txt
-project/
-  .orbit/
-    project.json
-    config.json
-    index/
-      project-map.json
-      checksums.json
-    memory/
-      overview.md
-      decisions.md
-      failures.md
-      generated-overview.md
-    sessions/
-    reports/
-    traces/
-```
-
-### `.orbit/project.json`
-
-Stores local project identity.
-
-```json
-{
-  "name": "shop-app",
-  "root": "/Users/marcolau/Documents/GitHub/shop-app",
-  "framework": "Next.js",
-  "packageManager": "pnpm",
-  "testFramework": "Playwright",
-  "createdAt": "2026-07-14T10:36:00.000Z",
-  "updatedAt": "2026-07-14T10:36:00.000Z"
-}
-```
-
-### `.orbit/config.json`
-
-Stores project-specific Orbit settings.
+### Configuration (`.orbit/config.json`)
 
 ```json
 {
   "approvalMode": "ask",
   "defaultBrowser": "chromium",
   "baseUrl": "http://localhost:3000",
-  "devCommand": null,
+  "devCommands": [],
   "testCommand": null,
-  "testDir": "tests/e2e",
+  "testDir": "Orbit_test/e2e",
+  "manualTestDir": "Orbit_test/user_input_test",
   "writeMode": "ask",
-  "maxRepairAttempts": 3
+  "maxRepairAttempts": 3,
+  "dockerComposeFile": null,
+  "dockerComposeHasHealthchecks": false,
+  "scanMode": null
 }
 ```
 
-### `.orbit/index/`
+`baseUrl` and `dockerComposeFile` are auto-detected at `/init`. `scanMode` starts `null` (not yet chosen) and gets set the first time you pick regex or graphify. `manualTestDir` holds human-readable `.md` records for features that needed `request_user_input` — never a runnable test, since there's nothing safe to automate for those.
 
-Stores generated project indexes.
-
-These files are rebuildable and can be refreshed with `/scan`.
-
-### `.orbit/memory/`
-
-Stores human-readable QA memory.
-
-These files are intended to be editable and compatible with Markdown tools such as Obsidian.
-
-## Commands
-
-Orbit supports slash commands inside the interactive terminal.
-
-### `/help`
-
-Show available Orbit commands.
-
-```txt
-/help
-```
-
-### `/init`
-
-Initialize Orbit in the current project.
-
-```txt
-/init
-```
-
-The init flow:
-
-1. Confirms the project name
-2. Creates missing `.orbit/` files
-3. Runs an initial deterministic scan
-4. Writes `.orbit/index/project-map.json`
-5. Adds the project to `~/.orbit/projects.json`
-
-If `.orbit/` already exists, Orbit will not overwrite user-editable files by default.
-
-### `/scan`
-
-Refresh the current project index.
-
-```txt
-/scan
-```
-
-The scan command:
-
-* Walks relevant project files
-* Ignores generated folders like `node_modules`, `.git`, `dist`, `build`, `.next`, and `.orbit`
-* Detects framework, package manager, and test framework
-* Classifies files as routes, components, commands, AI files, tests, configs, utilities, and project logic
-* Writes the result to:
-
-```txt
-.orbit/index/project-map.json
-```
-
-### `/projects`
-
-Show projects remembered by Orbit.
-
-```txt
-/projects
-```
-
-This reads:
-
-```txt
-~/.orbit/projects.json
-```
-
-### `/abort`
-
-Abort the current running task.
-
-```txt
-/abort
-```
-
-Aliases:
-
-```txt
-/cancel
-/stop
-```
-
-This is useful for stopping an AI request, scan, or other long-running operation.
-
-### `/deinit`
-
-Remove Orbit context from the current project.
-
-```txt
-/deinit
-```
-
-Recommended behavior:
-
-* Move local `.orbit/` to a backup folder
-* Remove the project from `~/.orbit/projects.json`
-* Update the current TUI project state
-
-Example:
-
-```txt
-.orbit
-→ .orbit.deleted-2026-07-14T10-36-00
-```
-
-## AI Setup
-
-Orbit uses the OpenAI SDK for AI-powered tasks.
-
-Install the SDK:
-
-```bash
-npm install openai
-```
-
-Set your API key:
-
-```bash
-export OPENAI_API_KEY="your_api_key_here"
-```
-
-For local development, you can use a `.env` file:
-
-```env
-OPENAI_API_KEY=your_api_key_here
-```
-
-Then load it in the CLI entry file:
-
-```ts
-import 'dotenv/config';
-```
-
-or run with:
-
-```json
-{
-  "scripts": {
-    "dev": "tsx -r dotenv/config src/cli.tsx"
-  }
-}
-```
-
-Do not store API keys in:
-
-```txt
-~/.orbit/config.json
-<project>/.orbit/config.json
-```
-
-## Scanning Strategy
-
-Orbit uses a hybrid scan strategy.
-
-### Deterministic Scan
-
-The deterministic scan runs first and does not require AI.
-
-It collects:
-
-* Source files
-* Config files
-* Routes
-* Components
-* Tests
-* Commands
-* AI-related files
-* Project logic files
-* Utility files
-* Type files
-* Markdown files
-
-It writes a project map to:
-
-```txt
-.orbit/index/project-map.json
-```
-
-### AI Scan
-
-AI is used after deterministic scanning.
-
-AI should not receive the whole repository blindly. Instead, Orbit should send selected files or grouped feature context to the model.
-
-Good AI tasks include:
-
-* Summarizing a feature
-* Explaining a route
-* Finding likely E2E scenarios
-* Classifying ambiguous files
-* Suggesting missing tests
-* Understanding user-facing flows
-
-## Memory Design
-
-Orbit has two memory layers.
-
-### Global Memory
-
-Stored in:
+## `~/.orbit/` — global context
 
 ```txt
 ~/.orbit/
+  bin/orbit               # the installed executable
+  config.json               # version, approvalMode, defaultBrowser, defaultModel, telemetry, lastOpenedProject
+  projects.json               # every project Orbit has been initialized in
+  memory/preference.md          # your own QA preferences, editable
 ```
 
-Used for:
+`projects.json` entries carry name, path, framework, package manager, test framework, and usage stats (`lastOpenedAt`, `lastScannedAt`, `openCount`) — enough for `/projects` and `/switch` to work without rescanning everything.
 
-* User preferences
-* Known initialized projects
-* Last opened project
-* Global configuration
+## Safety model
 
-### Local Project Memory
-
-Stored in:
-
-```txt
-<project>/.orbit/
-```
-
-Used for:
-
-* Project-specific scan results
-* QA notes
-* Feature summaries
-* Testing decisions
-* Failure patterns
-* Generated reports
-
-## Obsidian-Compatible Memory
-
-Orbit memory is designed to work well with Markdown tools such as Obsidian.
-
-A future memory structure may look like:
-
-```txt
-.orbit/memory/
-  index.md
-  features/
-    login.md
-    checkout.md
-  tests/
-    login-e2e.md
-  failures/
-    missing-seed-data.md
-  decisions/
-    playwright-strategy.md
-```
-
-Notes can use wiki-style links:
-
-```md
-# Login
-
-Tags: #orbit #feature #auth
-
-## Related
-
-- [[login-e2e]]
-- [[dashboard]]
-- [[missing-test-user]]
-```
-
-This allows Obsidian to display a memory graph while Orbit can still parse the Markdown files itself.
+Every file write, shell command, and destructive test-environment action is gated behind an explicit approval prompt by default (`approvalMode`/`writeMode: "ask"`) — you see exactly what's about to run and why before it happens. Orbit never classifies a shell command as "safe" or "dangerous" by its text — that judgment isn't reliable to automate, so every command gets the same approval gate regardless of what it looks like. Orbit never reads `.env` file contents, and never stores API keys, passwords, tokens, or real user data in its own memory files.
 
 ## Development
 
-Run Orbit in development mode:
-
 ```bash
-npm run dev
+npm install
+npm run dev      # tsx source/cli.tsx
+npm run build    # tsup source/cli.tsx --format esm --out-dir dist
+npm start         # node dist/cli.js
 ```
-
-Build:
-
-```bash
-npm run build
-```
-
-Run built output:
-
-```bash
-npm start
-```
-
-Recommended `package.json` scripts:
-
-```json
-{
-  "scripts": {
-    "dev": "tsx -r dotenv/config src/cli.tsx",
-    "build": "tsup src/cli.tsx --format esm --out-dir dist --clean",
-    "start": "node dist/cli.js"
-  }
-}
-```
-
-## Project Detection
-
-Orbit attempts to detect the project root by looking for markers such as:
-
-```txt
-package.json
-playwright.config.*
-cypress.config.*
-next.config.*
-vite.config.*
-.git
-.orbit
-```
-
-Project detection is read-only. It should not create `.orbit/`.
-
-Orbit only creates `.orbit/` when the user runs:
-
-```txt
-/init
-```
-
-## Recommended `.gitignore`
-
-For projects using Orbit, commit human-editable context if desired, but ignore generated runtime artifacts.
-
-```gitignore
-.orbit/index/
-.orbit/sessions/
-.orbit/reports/
-.orbit/traces/
-```
-
-Usually safe to commit:
-
-```txt
-.orbit/project.json
-.orbit/config.json
-.orbit/memory/*.md
-```
-
-But this depends on the team’s preference.
-
-Do not commit secrets, tokens, credentials, or sensitive test data.
-
-## Safety Rules
-
-Orbit should ask before:
-
-* Creating files
-* Modifying source code
-* Running shell commands
-* Running tests
-* Deleting local Orbit context
-* Re-initializing an existing `.orbit/` folder
-
-Orbit should never store:
-
-* API keys
-* Passwords
-* Tokens
-* `.env` contents
-* Real customer data
-* Sensitive production data
-
-## Roadmap
-
-Planned features:
-
-* AI-assisted project summaries
-* Feature map generation
-* Playwright test generation
-* Test execution through Orbit
-* Test repair suggestions
-* File patch approval flow
-* Obsidian-style memory graph
-* Project switching
-* Incremental scanning
-* Better feature classification
-* Report generation
-* Local model support
-* Provider abstraction for different AI models
-
-## Example Workflow
-
-```bash
-cd ~/Documents/GitHub/shop-app
-orbit
-```
-
-Inside Orbit:
-
-```txt
-/init
-```
-
-Orbit confirms the project name, creates `.orbit/`, scans the project, and remembers it globally.
-
-Then:
-
-```txt
-/scan
-```
-
-refreshes the project index.
-
-Then:
-
-```txt
-/ai give me Playwright E2E test ideas for the checkout flow
-```
-
-asks the AI model for testing ideas.
 
 ## Philosophy
 
-Orbit should be:
-
-* Terminal-first
-* Safe by default
-* Project-aware
-* QA-focused
-* Human-readable
-* Obsidian-compatible
-* AI-assisted, not AI-dependent
-
-The deterministic scanner should make Orbit useful even without AI.
-
-The AI layer should make Orbit smarter, but not fragile.
+* Terminal-first, project-aware, safe by default
+* Human-readable memory — plain Markdown, editable by hand
+* AI-assisted, not AI-dependent: the deterministic regex scan works with zero AI calls; AI (and the optional knowledge graph) make Orbit sharper without becoming a hard dependency
+* Every AI belief — environment readiness, a passing test, a "bug" — is independently re-verified, never taken on its own word
