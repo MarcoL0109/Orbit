@@ -219,6 +219,7 @@ export function initOrbitProject({
       maxRepairAttempts: 3,
       dockerComposeFile: dockerCompose.file,
       dockerComposeHasHealthchecks: dockerCompose.hasHealthchecks,
+      scanMode: null,
     } satisfies OrbitConfig),
 
     writeTextIfMissing(

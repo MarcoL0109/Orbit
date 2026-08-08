@@ -32,7 +32,11 @@ export function writeManualInputTestRecords(
     const manualResults = results.filter((result) => result.requiresManualInput);
     if (manualResults.length === 0) return [];
 
-    const manualTestDir = path.resolve(projectRoot, orbitConfig.manualTestDir);
+    // Falls back rather than crashing on a project whose config.json
+    // predates this field (path.resolve throws on undefined) — caught
+    // live testing against Redemption, whose .orbit/config.json was
+    // written before manualTestDir existed.
+    const manualTestDir = path.resolve(projectRoot, orbitConfig.manualTestDir ?? 'Orbit_test/user_input_test');
     fs.mkdirSync(manualTestDir, {recursive: true});
 
     const now = new Date().toISOString();

@@ -35,6 +35,10 @@ export type OrbitConfig = {
     // readiness signal instead of guessing via HTTP polling. Always false
     // when dockerComposeFile is null.
     dockerComposeHasHealthchecks: boolean;
+    // null means "not yet chosen" — the user is asked once, on whatever
+    // scan happens first for this project, and the answer is persisted
+    // here so they're never asked again. See scanOrchestration.ts.
+    scanMode: 'regex' | 'graphify' | null;
 };
 
 export function getOrbitConfigPath(projectRoot: string): string {
@@ -53,4 +57,8 @@ export function readOrbitConfig(projectRoot: string): OrbitConfig | null {
     } catch {
         return null;
     }
+}
+
+export function writeOrbitConfig(projectRoot: string, config: OrbitConfig): void {
+    fs.writeFileSync(getOrbitConfigPath(projectRoot), JSON.stringify(config, null, 2), 'utf8');
 }

@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ResponseInputItem } from 'openai/resources/responses/responses';
 import { createOpenAIClient, type ResponsesClient } from './client.js';
-import { toolRegistry, type ToolContext } from './tools/index.js';
+import { toolRegistry, explainSymbolTool, type ToolContext, type ToolDefinition } from './tools/index.js';
+import { graphifyGraphExists } from '../projects/graphifyGraph.js';
 import { spawnBrowserWorker, type BrowserWorkerHandle } from './browserWorker.js';
 import { runAgentTurn, type AgentStep, type AgentProgressEvent, type AgentTurnResult } from './agentLoop.js';
 import type { ReportResultArgs, FeatureResult } from './tools/reportResult.js';
@@ -29,6 +30,7 @@ const ACTIVITY_LABEL: Record<string, string> = {
     report_result: 'Wrapping up...',
     browser_action: 'Exploring the page...',
     request_user_input: 'Waiting for input...',
+    explain_symbol: 'Checking the code graph...',
 };
 
 export function describeAgentActivity(event: AgentProgressEvent): string {
@@ -164,6 +166,7 @@ function buildSystemPrompt(
     memory: ProjectMemory,
     knownClassifications: string,
     testsWrittenThisRun: string[],
+    hasExplainSymbol: boolean,
 ): string {
     return `You are Orbit, an AI QA agent for E2E testing.
 
@@ -177,12 +180,17 @@ Files already confirmed by feature (from past runs — read the file directly if
 ${knownClassifications}
 
 Use the project index above to find the right file to read before writing selectors — prefer it over guessing paths. If a feature you're asked to test isn't listed anywhere, use read_file to explore starting from a route or component that seems related.
-
+${hasExplainSymbol ? '\nA code knowledge graph is available for this project (explain_symbol). When you start a NEW feature, before any read_file calls, call explain_symbol on the most relevant entry point — the route or component the project index above points to — to see what it\'s connected to (other components, API handlers, shared utilities). Use that map to decide what actually needs reading, rather than opening the first plausible file and expanding your understanding one read_file call at a time. Keep doing this as you go, too: call explain_symbol on any further route, component, or function BEFORE your first read_file call on it, every time — this is your default first move for anything you haven\'t already explored this run, not something to reach for only once you notice you need it. It\'s far cheaper than opening a file and often tells you everything you need (what it imports, what calls it, where it lives) without a read at all. Only fall back to read_file once you actually need to see the real code — exact markup, prop names, JSX structure, selectors — not just its relationships to the rest of the codebase.\n' : ''}
 Project memory (read this before writing anything — avoid repeating documented failure patterns and follow documented conventions):
 
 ${summarizeMemory(memory)}
 
 If a run fails because of a broken selector or similar test-side issue, you may patch that feature's test file and run it again — you have a budget of ${context.orbitConfig.maxRepairAttempts} repair attempts per feature. If a run fails because of an actual application bug (not a problem with the test itself), do not keep patching it — report that feature as failed instead. This includes a bug you identified during exploration rather than from a run_test failure (see below): still write the test against the intended behavior and run it once, so the failure is backed by a real, reproducible Playwright result rather than only your own read of the page — but do not spend repair attempts on it once that run confirms it, since patching the test cannot fix a bug in the application. Report the feature as failed right away instead.
+
+Telling these apart during live exploration (not a run_test failure) is otherwise genuinely ambiguous — a form that silently doesn't do what you expected looks the same on screen whether your click missed its target or the server errored out. Don't guess: check the browser_action response's apiCalls and consoleErrors fields (present on every response, even when nothing went wrong) before deciding which case you're in.
+- An apiCalls entry with a 4xx/5xx status and a real backend error message is direct, decisive evidence of an application bug — stop retrying different inputs or selectors, no UI-side change will fix a server error. Report it as a bug instead.
+- A 2xx apiCalls entry is not automatically fine, either — check whether its body actually contains what you expected (e.g. a freshly-created item, a non-empty list). If the request clearly succeeded and returned real data but the DOM snapshot doesn't reflect it, that's a rendering bug: the data existed, the UI failed to show it. This is just as decisive as a failed request — do not chalk it up to your own selector being wrong when the response body already proves the data was there.
+- Only when apiCalls is empty, or its contents genuinely match what the DOM shows (e.g. an empty list response and an empty-state UI — that's correct, not a bug), should you treat an unexpected result as your own selector or assumption being wrong and try a different approach before concluding it's the app.
 
 Exploring with a real browser (browser_action): the app runs at ${context.orbitConfig.baseUrl} — navigate accepts a path relative to that (e.g. "/SignUp") or a full URL. read_file shows you source code, not what actually renders — runtime data, conditional branches, and component-library internals can all make the real page different from what the source suggests. Use browser_action to ground your selectors and expected outcomes in what you actually observe, especially for anything read_file can't tell you: content behind a login, a multi-step flow with no direct URL per step, or a state that only appears after an interaction (a toast, a modal, a cart badge). navigate/click/fill already return the resulting accessibility snapshot whenever the page actually changed — you don't need to separately call snapshot after them. Call snapshot on its own only to re-check the current state without taking a new action. Call reset when you start exploring a NEW feature (fresh cookies/storage) — do not call it between pages within the same feature's flow, since a multi-page journey (e.g. cart -> checkout -> payment) depends on staying in the same browser context throughout. A sequence where a later step only makes sense because of what an earlier step just did — reset a password, then verify you can log in with that new password; sign up, then check the account shows as unactivated — is ONE feature, not two, even if the prompt describes it as a list of things to do in order. Only reset when moving to something genuinely independent of what you just verified, not for every checkpoint within one continuous journey. Keep in mind browser_action shows you what actually happens, not what's supposed to happen — if what you observe contradicts the feature description you were given or a documented convention in project memory, treat that as a possible application bug rather than writing an assertion that simply matches the broken behavior.
 
@@ -244,6 +252,16 @@ export async function runTestingAgent(
         hasUnconsumedManualInput: () => manualInputPendingRef.current,
     };
 
+    // Computed once, not per-turn — scanMode and the graph's presence on
+    // disk don't change mid-run. explain_symbol is only ever offered to the
+    // model when graphify actually produced a graph for this project;
+    // otherwise the tool doesn't exist as far as the model is concerned,
+    // rather than existing and failing every call.
+    const activeToolRegistry: ToolDefinition<any, any, ToolContext>[] =
+        context.orbitConfig.scanMode === 'graphify' && graphifyGraphExists(context.projectRoot)
+            ? [...toolRegistry, explainSymbolTool]
+            : toolRegistry;
+
     let previousResponseId: string | undefined;
     let nextInput: string | ResponseInputItem[] = prompt;
 
@@ -270,10 +288,10 @@ export async function runTestingAgent(
             const turn: AgentTurnResult = await runAgentTurn<ToolContext>({
                 client,
                 model: 'gpt-5.2',
-                instructions: buildSystemPrompt(toolContext, projectMap, memory, knownClassifications, testsWrittenThisRun),
+                instructions: buildSystemPrompt(toolContext, projectMap, memory, knownClassifications, testsWrittenThisRun, activeToolRegistry !== toolRegistry),
                 input: nextInput,
                 previousResponseId,
-                toolRegistry,
+                toolRegistry: activeToolRegistry,
                 context: toolContext,
                 signal: context.signal,
                 steps,

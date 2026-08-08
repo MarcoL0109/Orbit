@@ -43,6 +43,9 @@ export type CommandContext = {
     setConfirmDeinit: React.Dispatch<React.SetStateAction<boolean>>;
     requestApproval: (description: string) => Promise<boolean>;
     requestInput: (prompt: string) => Promise<string | null>;
+    // Asked once per project, the first time a scan happens and no choice
+    // has been persisted yet — see scanOrchestration.ts.
+    requestScanMode: () => Promise<'regex' | 'graphify'>;
     setAgentActivity: React.Dispatch<React.SetStateAction<string | null>>;
     // Keyed by project root, not a single flag — switching projects (/switch)
     // shouldn't let one project's confirmed-ready state apply to another.

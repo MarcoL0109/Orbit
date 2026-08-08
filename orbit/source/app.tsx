@@ -13,7 +13,8 @@ import { runCommand } from './commands/runCommand.js';
 import { getBestCommandCompletion, getGhostCompletion } from './commands/autocomplete.js';
 import { formatScanResult } from './projects/scan.js';
 import { readGlobalProjects } from './registry/knownProjects.js';
-import { scanProject, writeProjectMap } from './projects/scan.js';
+import { writeProjectMap } from './projects/scan.js';
+import { scanProjectWithModeSelection } from './projects/scanOrchestration.js';
 import { deinitLocalContext, getProjectPath, deinitGlobalContext } from './init/deinit.js';
 import { reportError } from './commands/error.js';
 
@@ -39,6 +40,7 @@ export function App({ initialPrompt }: AppProps) {
 	const [confirmDeinit, setConfirmDeinit] = useState<boolean>(false);
 	const [confirmName, setConfirmName] = useState<string>("");
 	const [pendingApproval, setPendingApproval] = useState<{description: string; resolve: (approved: boolean) => void} | null>(null);
+	const [pendingScanMode, setPendingScanMode] = useState<{resolve: (mode: 'regex' | 'graphify') => void} | null>(null);
 	const [pendingInput, setPendingInput] = useState<{prompt: string; resolve: (value: string | null) => void} | null>(null);
 	const [pendingInputValue, setPendingInputValue] = useState<string>("");
 	const [agentActivity, setAgentActivity] = useState<string | null>(null);
@@ -131,6 +133,19 @@ export function App({ initialPrompt }: AppProps) {
 	function handleApprovalSelect(item: any) {
 		pendingApproval?.resolve(item.value === 'approve');
 		setPendingApproval(null);
+	}
+
+
+	function requestScanMode(): Promise<'regex' | 'graphify'> {
+		return new Promise((resolve) => {
+			setPendingScanMode({resolve});
+		});
+	}
+
+
+	function handleScanModeSelect(item: any) {
+		pendingScanMode?.resolve(item.value);
+		setPendingScanMode(null);
 	}
 
 
@@ -253,6 +268,7 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 			setConfirmDeinit,
 			requestApproval,
 			requestInput,
+			requestScanMode,
 			setAgentActivity,
 			isEnvironmentReady,
 			markEnvironmentReady,
@@ -382,7 +398,11 @@ Global memory updated:
 		// from an init failure and should be reported as such.
 		if (initSucceeded && project.root) {
 			try {
-				const projectMap = await scanProject(project.root);
+				const projectMap = await scanProjectWithModeSelection(project.root, {
+					requestApproval,
+					requestScanMode,
+					setMessages,
+				});
 				const projectMapPath = writeProjectMap(project.root, projectMap);
 				setMessages((prev) => [
 					...prev,
@@ -516,7 +536,7 @@ Global memory updated:
 			))}
 		</Box>
 
-		{isBooting || selectProjectMode || confirmDeinit || checkName || isInitting || pendingApproval || pendingInput ? (
+		{isBooting || selectProjectMode || confirmDeinit || checkName || isInitting || pendingApproval || pendingScanMode || pendingInput ? (
 			<Box marginTop={1}>
 				<Text color="yellow">
 					<Spinner type="dots" /> Selection Menu In Progress...
@@ -609,6 +629,21 @@ Global memory updated:
 					<SelectInput
 						items={[{label: "Approve", value: "approve"}, {label: "Deny", value: "deny"}]}
 						onSelect={handleApprovalSelect}
+					/>
+				</Box>
+			)
+		}
+
+		{
+			pendingScanMode && (
+				<Box flexDirection="column">
+					<Text color="yellow">How should Orbit understand this project's code?</Text>
+					<SelectInput
+						items={[
+							{label: "Regex — built-in heuristic scan, always available", value: "regex"},
+							{label: "Graphify — deeper AST-based knowledge graph, needs a separate install", value: "graphify"},
+						]}
+						onSelect={handleScanModeSelect}
 					/>
 				</Box>
 			)

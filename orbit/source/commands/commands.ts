@@ -6,7 +6,8 @@ import { runEnvironmentSetupAgent } from '../ai/environmentSetupAgent.js';
 import { writeAgentSession, writeManualInputTestRecords } from '../ai/session.js';
 import { readOrbitConfig } from '../init/config.js';
 import { readEnvironmentSetupInstructions, writeEnvironmentSetupInstructions } from '../init/memory.js';
-import {scanProject, writeProjectMap} from '../projects/scan.js';
+import {writeProjectMap} from '../projects/scan.js';
+import {scanProjectWithModeSelection} from '../projects/scanOrchestration.js';
 import { getProjectPath } from '../init/deinit.js';
 import { formatScanResult } from "../projects/scan.js";
 import { computeCoverage, formatCoverageSummary, describeCoverageEntry, colorForCoverageStatus, type CoverageEntry } from '../projects/coverage.js';
@@ -170,6 +171,16 @@ Available Orbit commands:
                 context.setIsThinking(true);
                 const controller = context.startAbortableTask();
 
+                // Set only when Orbit itself starts Docker infrastructure
+                // this run (not when the environment was already reachable,
+                // and not on later /test calls in the same session that
+                // just reuse it) — used below to show a one-time reminder
+                // that Orbit deliberately never tears containers down
+                // itself. See the incident this followed: a manual
+                // `docker compose down` outside any Orbit code path removed
+                // a container that predated the session entirely.
+                let startedDockerInfraThisRun = false;
+
                 // Runs at most once per project per session — see
                 // CommandContext.isEnvironmentReady's own note on why a
                 // crash mid-session isn't auto-recovered from.
@@ -260,6 +271,7 @@ Available Orbit commands:
                         }
 
                         context.markEnvironmentReady(context.project.root);
+                        startedDockerInfraThisRun = orbitConfig.dockerComposeFile !== null;
                     }
                 }
 
@@ -269,7 +281,11 @@ Available Orbit commands:
                 // works from whatever map (if any) was already on disk.
                 try {
                     context.setAgentActivity('Scanning project for changes...');
-                    const projectMap = await scanProject(context.project.root);
+                    const projectMap = await scanProjectWithModeSelection(context.project.root, {
+                        requestApproval: context.requestApproval,
+                        requestScanMode: context.requestScanMode,
+                        setMessages: context.setMessages,
+                    });
                     writeProjectMap(context.project.root, projectMap);
                 } catch (error) {
                     reportError(context.setMessages, {
@@ -302,6 +318,22 @@ Available Orbit commands:
                         color: result.status === 'passed' ? 'green' : result.status === 'aborted' ? 'yellow' : 'red',
                     },
                 ]);
+
+                // One-time per session, not on every /test — see
+                // isEnvironmentReady's own caching, which is exactly why
+                // this only needs to fire once even across many /test runs
+                // against the same project. Orbit never runs this itself;
+                // it's left entirely to the user.
+                if (startedDockerInfraThisRun) {
+                    context.setMessages((prev) => [
+                        ...prev,
+                        {
+                            role: 'agent',
+                            content: 'Docker containers are still running for this project. Orbit leaves them up for reuse across /test runs and never stops them on its own — run `docker compose down` yourself when you\'re done with them.',
+                            color: 'gray',
+                        },
+                    ]);
+                }
             } catch (error) {
                 reportError(context.setMessages, {
                     kind: 'unexpected',
@@ -349,7 +381,11 @@ Available Orbit commands:
             try {
                 context.setIsThinking(true);
 
-                const projectMap = await scanProject(context.project.root);
+                const projectMap = await scanProjectWithModeSelection(context.project.root, {
+                    requestApproval: context.requestApproval,
+                    requestScanMode: context.requestScanMode,
+                    setMessages: context.setMessages,
+                });
                 const projectMapPath = writeProjectMap(context.project.root, projectMap);
 
                 context.setMessages((prev) => [
@@ -392,7 +428,11 @@ Available Orbit commands:
             try {
                 context.setIsThinking(true);
                 context.setAgentActivity('Scanning project for changes...');
-                projectMap = await scanProject(context.project.root);
+                projectMap = await scanProjectWithModeSelection(context.project.root, {
+                    requestApproval: context.requestApproval,
+                    requestScanMode: context.requestScanMode,
+                    setMessages: context.setMessages,
+                });
                 writeProjectMap(context.project.root, projectMap);
             } catch (error) {
                 reportError(context.setMessages, {

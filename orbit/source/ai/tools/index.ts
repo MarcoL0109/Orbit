@@ -5,6 +5,7 @@ import { runTestTool } from './runTest.js';
 import { reportResultTool } from './reportResult.js';
 import { browserActionTool } from './browserAction.js';
 import { requestUserInputTool } from './requestUserInput.js';
+import { explainSymbolTool } from './explainSymbol.js';
 import type { ToolDefinition } from './types.js';
 
 export const toolRegistry: ToolDefinition[] = [
@@ -39,9 +40,10 @@ export function toApiToolSchema(tool: ToolDefinition<any, any, any>): FunctionTo
     };
 }
 
-export { readFileTool, writeTestFileTool, runTestTool, reportResultTool, browserActionTool, requestUserInputTool };
+export { readFileTool, writeTestFileTool, runTestTool, reportResultTool, browserActionTool, requestUserInputTool, explainSymbolTool };
 export type { RunTestResult, TestFailureDetail } from './runTest.js';
 export type { ReportResultArgs } from './reportResult.js';
 export type { BrowserActionArgs } from './browserAction.js';
 export type { RequestUserInputArgs } from './requestUserInput.js';
+export type { ExplainSymbolArgs, ExplainSymbolResult } from './explainSymbol.js';
 export type { ToolContext, ToolResult, ToolDefinition } from './types.js';
