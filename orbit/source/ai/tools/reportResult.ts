@@ -23,6 +23,13 @@ export type FeatureResult = {
     // is true — this is what actually answers "did the manual part work",
     // not just prose in `summary` that the model might forget to include.
     manualStepOutcome: 'succeeded' | 'failed' | null;
+    // Required, not optional — the model must explicitly commit to one or
+    // the other for every result, not just the ones it happens to flag.
+    // 'uncertain' is checked below: it's only accepted if confirm_outcome
+    // was already called for this exact feature. This is what actually
+    // enforces asking the user on a genuinely ambiguous result instead of
+    // leaving it to the model's own discretion about whether to bother.
+    confidence: 'certain' | 'uncertain';
 };
 
 export type ReportResultArgs = {
@@ -71,13 +78,32 @@ export const reportResultTool: ToolDefinition<ReportResultArgs, ReportResultArgs
                             enum: ['succeeded', 'failed'],
                             description: 'Whether the manually-assisted step itself worked once given the value (e.g. the activation code actually activated the account) — not the overall test status. Required (non-null) when requiresManualInput is true; must be null when it is false.',
                         },
+                        confidence: {
+                            type: 'string',
+                            enum: ['certain', 'uncertain'],
+                            description: 'Mark \'uncertain\' if you cannot confidently tell whether this outcome is actually correct — no decisive apiCalls/consoleErrors evidence either way, a live interaction (drag-and-drop, complex gestures) Playwright may not simulate reliably, or timing/environment-sensitive behavior. If \'uncertain\', you must have already called confirm_outcome for this exact feature, or this call is rejected. Mark \'certain\' only when the evidence actually supports it, not by default to skip confirm_outcome.',
+                        },
                     },
-                    required: ['feature', 'file', 'status', 'summary', 'requiresManualInput', 'manualStepOutcome'],
+                    required: ['feature', 'file', 'status', 'summary', 'requiresManualInput', 'manualStepOutcome', 'confidence'],
                     additionalProperties: false,
                 },
             },
         },
         required: ['results'],
     },
-    execute: async (args) => ({ok: true, data: args}),
+    execute: async (args, context) => {
+        const unconfirmed = args.results.filter(
+            (result) => result.confidence === 'uncertain' && !context.hasConfirmedOutcome(result.feature),
+        );
+
+        if (unconfirmed.length > 0) {
+            const features = unconfirmed.map((result) => `"${result.feature}"`).join(', ');
+            return {
+                ok: false,
+                error: `Marked ${features} as confidence: 'uncertain' but never called confirm_outcome for ${unconfirmed.length === 1 ? 'it' : 'them'}. Call confirm_outcome for each of these features first, then call report_result again.`,
+            };
+        }
+
+        return {ok: true, data: args};
+    },
 };

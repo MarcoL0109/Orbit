@@ -36,6 +36,17 @@ export type ToolContext = {
     // worker for this run — see agent.ts, which owns the actual lifecycle
     // and cleanup. Tools never spawn or close it themselves.
     getBrowserWorker: () => Promise<BrowserWorkerHandle>;
+    // Resolves once the user picks Success or Failure in the Ink UI — see
+    // confirm_outcome. Not for gathering new information (that's
+    // requestInput's job); this only ever judges something the agent already
+    // did and shows evidence for.
+    requestOutcomeConfirmation: (feature: string, whatWasDone: string, output: string) => Promise<'success' | 'failure'>;
+    // True once confirm_outcome has resolved for this exact feature name,
+    // this run. report_result checks this itself (see reportResult.ts) —
+    // a result marked confidence: 'uncertain' is rejected unless this is
+    // true for that feature, so asking the user isn't left to the model's
+    // own discretion about whether it feels unsure enough to bother.
+    hasConfirmedOutcome: (feature: string) => boolean;
 };
 
 // Deliberately smaller than ToolContext — the environment setup agent's

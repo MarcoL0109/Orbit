@@ -31,6 +31,7 @@ const ACTIVITY_LABEL: Record<string, string> = {
     browser_action: 'Exploring the page...',
     request_user_input: 'Waiting for input...',
     explain_symbol: 'Checking the code graph...',
+    confirm_outcome: 'Waiting for your judgment...',
 };
 
 export function describeAgentActivity(event: AgentProgressEvent): string {
@@ -205,6 +206,8 @@ Rules:
 - If a flow needs something you have no way to obtain yourself (a code sent by email/SMS, a secret only the user has), use request_user_input to ask for it rather than guessing a value or skipping the step silently. The user may decline — if so, stop and report what you couldn't get past.
 - Only make request_user_input when you are stuck or cannot proceed without user's input. Do not ask for user input in advance without actually explored the browser and went through the steps
 - Do NOT call write_test_file or run_test for any feature where you used request_user_input, whether the user provided the value or declined. There is no safe automated version of this: a persisted test can never obtain a fresh one-time value on a future run, so it would either fail deterministically every time (nothing to fill it with) or — worse — replaying the steps to reach that point again repeats whatever real side effect they have (e.g. clicking "send code" really does send another real email, every single time the test runs, forever). Verify the flow live with browser_action only, then call report_result directly for that feature with file: null, status reflecting what you actually observed, requiresManualInput: true, and manualStepOutcome set to whether the manually-assisted step itself worked. State in the summary that no automated test was written and why.
+- Every result you give report_result needs a confidence: 'certain' or 'uncertain'. Mark 'uncertain' when you genuinely cannot tell whether an outcome is actually correct — you already have a way to check this decisively for anything involving browser_action (its apiCalls/consoleErrors fields), so 'uncertain' is specifically for what's left after checking those: a live interaction Playwright may not simulate reliably (drag-and-drop, complex gestures), or behavior with no network/console evidence pointing either way. Do not mark everything 'certain' by default to avoid the extra step — that defeats the entire point of the field.
+- If you mark a result 'uncertain', call confirm_outcome for that exact feature BEFORE calling report_result — show the user what you actually did and the real evidence (not your interpretation of it), and use their answer as that feature's actual status. report_result will reject an 'uncertain' result it hasn't already gotten a matching confirm_outcome call for; the feature name you pass to confirm_outcome must exactly match the one you then use in report_result.
 - Call report_result exactly once, when you are completely done with every feature, with one result entry per feature. Do not stop without calling it.`;
 }
 
@@ -224,7 +227,7 @@ function summarizeFeatureResults(results: FeatureResult[]): string {
 
 export async function runTestingAgent(
     prompt: string,
-    context: Omit<ToolContext, 'getBrowserWorker' | 'hasExploredWithBrowser' | 'hasUnconsumedManualInput'>,
+    context: Omit<ToolContext, 'getBrowserWorker' | 'hasExploredWithBrowser' | 'hasUnconsumedManualInput' | 'hasConfirmedOutcome'>,
     options: RunTestingAgentOptions = {},
 ): Promise<AgentRunResult> {
     const maxSteps = options.maxSteps ?? 40;
@@ -240,6 +243,13 @@ export async function runTestingAgent(
     const browserWorkerRef: {current: BrowserWorkerHandle | null} = {current: null};
     const hasUsedBrowserActionRef: {current: boolean} = {current: false};
     const manualInputPendingRef: {current: boolean} = {current: false};
+    // Feature names confirm_outcome has resolved for this run — checked by
+    // report_result itself (see reportResult.ts) before it'll accept a
+    // result marked confidence: 'uncertain'. Exact string match against
+    // whatever feature name the model used, which is why confirm_outcome's
+    // own description tells it to use the same name it'll pass to
+    // report_result.
+    const confirmedFeaturesRef: {current: Set<string>} = {current: new Set()};
     const toolContext: ToolContext = {
         ...context,
         getBrowserWorker: async () => {
@@ -250,6 +260,7 @@ export async function runTestingAgent(
         },
         hasExploredWithBrowser: () => hasUsedBrowserActionRef.current,
         hasUnconsumedManualInput: () => manualInputPendingRef.current,
+        hasConfirmedOutcome: (feature) => confirmedFeaturesRef.current.has(feature),
     };
 
     // Computed once, not per-turn — scanMode and the graph's presence on
@@ -306,6 +317,8 @@ export async function runTestingAgent(
                         manualInputPendingRef.current = true;
                     } else if (name === 'browser_action' && result.ok && (args as {action?: string}).action === 'fill') {
                         manualInputPendingRef.current = false;
+                    } else if (name === 'confirm_outcome' && result.ok) {
+                        confirmedFeaturesRef.current.add((args as {feature: string}).feature);
                     }
                 },
             });

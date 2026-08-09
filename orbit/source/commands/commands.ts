@@ -303,6 +303,7 @@ Available Orbit commands:
                     signal: controller.signal,
                     requestApproval: context.requestApproval,
                     requestInput: context.requestInput,
+                    requestOutcomeConfirmation: context.requestOutcomeConfirmation,
                 }, {
                     onProgress: (event) => context.setAgentActivity(describeAgentActivity(event)),
                 });

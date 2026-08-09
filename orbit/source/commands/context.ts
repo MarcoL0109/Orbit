@@ -46,6 +46,8 @@ export type CommandContext = {
     // Asked once per project, the first time a scan happens and no choice
     // has been persisted yet — see scanOrchestration.ts.
     requestScanMode: () => Promise<'regex' | 'graphify'>;
+    // Resolves once the user picks Success or Failure — see confirm_outcome.
+    requestOutcomeConfirmation: (feature: string, whatWasDone: string, output: string) => Promise<'success' | 'failure'>;
     setAgentActivity: React.Dispatch<React.SetStateAction<string | null>>;
     // Keyed by project root, not a single flag — switching projects (/switch)
     // shouldn't let one project's confirmed-ready state apply to another.

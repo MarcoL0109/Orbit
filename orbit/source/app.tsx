@@ -41,6 +41,7 @@ export function App({ initialPrompt }: AppProps) {
 	const [confirmName, setConfirmName] = useState<string>("");
 	const [pendingApproval, setPendingApproval] = useState<{description: string; resolve: (approved: boolean) => void} | null>(null);
 	const [pendingScanMode, setPendingScanMode] = useState<{resolve: (mode: 'regex' | 'graphify') => void} | null>(null);
+	const [pendingOutcomeConfirmation, setPendingOutcomeConfirmation] = useState<{feature: string; whatWasDone: string; output: string; resolve: (outcome: 'success' | 'failure') => void} | null>(null);
 	const [pendingInput, setPendingInput] = useState<{prompt: string; resolve: (value: string | null) => void} | null>(null);
 	const [pendingInputValue, setPendingInputValue] = useState<string>("");
 	const [agentActivity, setAgentActivity] = useState<string | null>(null);
@@ -62,11 +63,11 @@ export function App({ initialPrompt }: AppProps) {
 
 	useInput((_input, key) => {
 		if (key.tab) {
-		const completion = getBestCommandCompletion(query);
+			const completion = getBestCommandCompletion(query);
 
-		if (completion) {
-			setQuery(completion + ' ');
-		}
+			if (completion) {
+				setQuery(completion + ' ');
+			}
 		}
 
 		if (key.escape && pendingInput) {
@@ -146,6 +147,19 @@ export function App({ initialPrompt }: AppProps) {
 	function handleScanModeSelect(item: any) {
 		pendingScanMode?.resolve(item.value);
 		setPendingScanMode(null);
+	}
+
+
+	function requestOutcomeConfirmation(feature: string, whatWasDone: string, output: string): Promise<'success' | 'failure'> {
+		return new Promise((resolve) => {
+			setPendingOutcomeConfirmation({feature, whatWasDone, output, resolve});
+		});
+	}
+
+
+	function handleOutcomeConfirmationSelect(item: any) {
+		pendingOutcomeConfirmation?.resolve(item.value);
+		setPendingOutcomeConfirmation(null);
 	}
 
 
@@ -269,6 +283,7 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 			requestApproval,
 			requestInput,
 			requestScanMode,
+			requestOutcomeConfirmation,
 			setAgentActivity,
 			isEnvironmentReady,
 			markEnvironmentReady,
@@ -536,7 +551,7 @@ Global memory updated:
 			))}
 		</Box>
 
-		{isBooting || selectProjectMode || confirmDeinit || checkName || isInitting || pendingApproval || pendingScanMode || pendingInput ? (
+		{isBooting || selectProjectMode || confirmDeinit || checkName || isInitting || pendingApproval || pendingScanMode || pendingOutcomeConfirmation || pendingInput ? (
 			<Box marginTop={1}>
 				<Text color="yellow">
 					<Spinner type="dots" /> Selection Menu In Progress...
@@ -644,6 +659,25 @@ Global memory updated:
 							{label: "Graphify — deeper AST-based knowledge graph, needs a separate install", value: "graphify"},
 						]}
 						onSelect={handleScanModeSelect}
+					/>
+				</Box>
+			)
+		}
+
+		{
+			pendingOutcomeConfirmation && (
+				<Box flexDirection="column">
+					<Text color="yellow">Orbit isn't sure whether this is a success or a failure — feature: {pendingOutcomeConfirmation.feature}</Text>
+					<Text bold>What it did:</Text>
+					<Text>{pendingOutcomeConfirmation.whatWasDone}</Text>
+					<Text bold>What happened:</Text>
+					<Text>{pendingOutcomeConfirmation.output}</Text>
+					<SelectInput
+						items={[
+							{label: "Success", value: "success"},
+							{label: "Failure", value: "failure"},
+						]}
+						onSelect={handleOutcomeConfirmationSelect}
 					/>
 				</Box>
 			)

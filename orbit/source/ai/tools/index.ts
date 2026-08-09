@@ -6,6 +6,7 @@ import { reportResultTool } from './reportResult.js';
 import { browserActionTool } from './browserAction.js';
 import { requestUserInputTool } from './requestUserInput.js';
 import { explainSymbolTool } from './explainSymbol.js';
+import { confirmOutcomeTool } from './confirmOutcome.js';
 import type { ToolDefinition } from './types.js';
 
 export const toolRegistry: ToolDefinition[] = [
@@ -15,6 +16,7 @@ export const toolRegistry: ToolDefinition[] = [
     reportResultTool,
     browserActionTool,
     requestUserInputTool,
+    confirmOutcomeTool,
 ];
 
 export function findTool(name: string): ToolDefinition | undefined {
@@ -40,10 +42,11 @@ export function toApiToolSchema(tool: ToolDefinition<any, any, any>): FunctionTo
     };
 }
 
-export { readFileTool, writeTestFileTool, runTestTool, reportResultTool, browserActionTool, requestUserInputTool, explainSymbolTool };
+export { readFileTool, writeTestFileTool, runTestTool, reportResultTool, browserActionTool, requestUserInputTool, explainSymbolTool, confirmOutcomeTool };
 export type { RunTestResult, TestFailureDetail } from './runTest.js';
 export type { ReportResultArgs } from './reportResult.js';
 export type { BrowserActionArgs } from './browserAction.js';
 export type { RequestUserInputArgs } from './requestUserInput.js';
 export type { ExplainSymbolArgs, ExplainSymbolResult } from './explainSymbol.js';
+export type { ConfirmOutcomeArgs, ConfirmOutcomeResult } from './confirmOutcome.js';
 export type { ToolContext, ToolResult, ToolDefinition } from './types.js';
