@@ -14,6 +14,52 @@ export type ScanOrchestrationDeps = {
 	setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
 };
 
+// The final outcome of a graphify build/update, as data rather than a
+// posted message — 'skipped' whenever graphify never actually ran (regex
+// mode, or a scan-mode choice that stayed unresolved). Callers decide how
+// (or whether) to show this: /scan, /coverage, and the pre-test rescan post
+// it as its own message exactly as before; /init instead folds it into its
+// single combined "Orbit initialized this project" message. The
+// interactive scan-mode-selection messages ("Skipped — using regex...",
+// "graphify installed.", an install failure) stay auto-posted from inside
+// this module regardless of caller — those are about the CHOOSING process
+// itself, not this result, and every caller wants them shown inline as
+// they happen.
+export type GraphifyOutcome =
+	| {status: 'skipped'}
+	| {status: 'success'; mode: 'extract' | 'update'; summary: string}
+	| {status: 'failed'; error: string};
+
+export type ScanOrchestrationResult = {
+	projectMap: ProjectMap;
+	graphifyOutcome: GraphifyOutcome;
+};
+
+// Formats a GraphifyOutcome for display, or null when there's nothing worth
+// showing (skipped) — callers post this themselves via their own
+// setMessages, however fits their own message flow.
+export function graphifyOutcomeMessage(
+	outcome: GraphifyOutcome,
+): {content: string; color: string} | null {
+	if (outcome.status === 'success') {
+		return {
+			content: `Knowledge graph ${
+				outcome.mode === 'extract' ? 'built' : 'updated'
+			}: ${outcome.summary}`,
+			color: 'green',
+		};
+	}
+
+	if (outcome.status === 'failed') {
+		// Non-fatal by design, same as scanProject's own callers treating a
+		// scan failure as non-blocking — the regex-based ProjectMap is
+		// still perfectly usable on its own.
+		return {content: `graphify scan failed: ${outcome.error}`, color: 'yellow'};
+	}
+
+	return null;
+}
+
 // Every scanProject() call site (init's auto-scan, /scan, the pre-test
 // rescan, /coverage) goes through this instead of calling scanProject
 // directly. scanProject's own ProjectMap is always built regardless — it's
@@ -24,41 +70,45 @@ export type ScanOrchestrationDeps = {
 export async function scanProjectWithModeSelection(
 	projectRoot: string,
 	deps: ScanOrchestrationDeps,
-): Promise<ProjectMap> {
+): Promise<ScanOrchestrationResult> {
 	const projectMap = await scanProject(projectRoot);
 
 	const orbitConfig = readOrbitConfig(projectRoot);
 	if (!orbitConfig) {
 		// Not initialized yet (or config unreadable) — nothing to persist
 		// a choice into, so just behave exactly as scanProject always has.
-		return projectMap;
+		return {projectMap, graphifyOutcome: {status: 'skipped'}};
 	}
 
 	// == not === : a project initialized before scanMode existed has no
 	// such field in its config.json at all (undefined), not literally
 	// null — both mean "not yet chosen" and should prompt the same way.
 	if (orbitConfig.scanMode == null) {
-		await resolveScanModeChoice(projectRoot, orbitConfig, deps);
-		return projectMap;
+		const graphifyOutcome = await resolveScanModeChoice(
+			projectRoot,
+			orbitConfig,
+			deps,
+		);
+		return {projectMap, graphifyOutcome};
 	}
 
 	if (orbitConfig.scanMode === 'graphify') {
-		runGraphifyAndReport(projectRoot, deps);
+		return {projectMap, graphifyOutcome: runGraphifyAndGetOutcome(projectRoot)};
 	}
 
-	return projectMap;
+	return {projectMap, graphifyOutcome: {status: 'skipped'}};
 }
 
 async function resolveScanModeChoice(
 	projectRoot: string,
 	orbitConfig: NonNullable<ReturnType<typeof readOrbitConfig>>,
 	deps: ScanOrchestrationDeps,
-): Promise<void> {
+): Promise<GraphifyOutcome> {
 	const mode = await deps.requestScanMode();
 
 	if (mode === 'regex') {
 		writeOrbitConfig(projectRoot, {...orbitConfig, scanMode: 'regex'});
-		return;
+		return {status: 'skipped'};
 	}
 
 	// Mode === 'graphify'
@@ -73,7 +123,7 @@ async function resolveScanModeChoice(
 				'Skipped — using the built-in regex scan for now. Run /scan again any time to reconsider graphify.',
 				'gray',
 			);
-			return; // ScanMode stays null — asked again next scan, not locked into regex.
+			return {status: 'skipped'}; // ScanMode stays null — asked again next scan, not locked into regex.
 		}
 
 		const installResult = installGraphify();
@@ -83,36 +133,22 @@ async function resolveScanModeChoice(
 				`Couldn't install graphify: ${installResult.reason}\nUsing the built-in regex scan for now.`,
 				'yellow',
 			);
-			return; // ScanMode stays null here too, for the same reason.
+			return {status: 'skipped'}; // ScanMode stays null here too, for the same reason.
 		}
 
 		postMessage(deps, 'graphify installed.', 'green');
 	}
 
 	writeOrbitConfig(projectRoot, {...orbitConfig, scanMode: 'graphify'});
-	runGraphifyAndReport(projectRoot, deps);
+	return runGraphifyAndGetOutcome(projectRoot);
 }
 
-function runGraphifyAndReport(
-	projectRoot: string,
-	deps: ScanOrchestrationDeps,
-): void {
+function runGraphifyAndGetOutcome(projectRoot: string): GraphifyOutcome {
 	const result = runGraphifyScan(projectRoot);
 
-	if (result.ok) {
-		postMessage(
-			deps,
-			`Knowledge graph ${result.mode === 'extract' ? 'built' : 'updated'}: ${
-				result.summary
-			}`,
-			'green',
-		);
-	} else {
-		// Non-fatal by design, same as scanProject's own callers treating
-		// a scan failure as non-blocking — the regex-based ProjectMap this
-		// function already returned is still perfectly usable on its own.
-		postMessage(deps, `graphify scan failed: ${result.error}`, 'yellow');
-	}
+	return result.ok
+		? {status: 'success', mode: result.mode, summary: result.summary}
+		: {status: 'failed', error: result.error};
 }
 
 function postMessage(

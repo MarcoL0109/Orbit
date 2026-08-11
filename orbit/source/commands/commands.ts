@@ -20,7 +20,10 @@ import {
 	writeEnvironmentSetupInstructions,
 } from '../init/memory.js';
 import {writeProjectMap, formatScanResult} from '../projects/scan.js';
-import {scanProjectWithModeSelection} from '../projects/scanOrchestration.js';
+import {
+	scanProjectWithModeSelection,
+	graphifyOutcomeMessage,
+} from '../projects/scanOrchestration.js';
 import {getProjectPath} from '../init/deinit.js';
 import {
 	computeCoverage,
@@ -35,15 +38,21 @@ import type {CommandContext} from './context.js';
 import {reportError, type ArgCountRule} from './error.js';
 
 // /config's editable fields — deliberately a subset of OrbitConfig.
-// scanMode already has its own flow (/scan's picker); dockerComposeFile and
-// dockerComposeHasHealthchecks are auto-detected facts, not preferences;
-// testDir/manualTestDir are conventions other code paths assume are stable.
-// Everything below is a genuine per-project preference someone would
-// otherwise open .orbit/config.json by hand to change.
+// dockerComposeFile and dockerComposeHasHealthchecks are auto-detected
+// facts, not preferences; testDir/manualTestDir are conventions other code
+// paths assume are stable. scanMode IS included despite already having its
+// own flow (/scan's picker) — that picker only ever fires once, while
+// scanMode is still null; once it's set (correctly or by mistake, e.g. a
+// stray keypress during the picker) there is otherwise no way to change it
+// short of deleting .orbit/config.json by hand or a destructive
+// /deinit + /init. Picking a new value here only persists the choice —
+// the actual graphify build/install still only happens on the next real
+// scan, exactly as if /scan's picker had been answered this way.
 type ConfigFieldDescriptor =
 	| {key: 'approvalMode'; label: string; kind: 'enum'; options: string[]}
 	| {key: 'writeMode'; label: string; kind: 'enum'; options: string[]}
 	| {key: 'defaultBrowser'; label: string; kind: 'enum'; options: string[]}
+	| {key: 'scanMode'; label: string; kind: 'enum'; options: string[]}
 	| {key: 'baseUrl'; label: string; kind: 'text'; nullable: false}
 	| {key: 'testCommand'; label: string; kind: 'text'; nullable: true}
 	| {key: 'maxRepairAttempts'; label: string; kind: 'number'}
@@ -67,6 +76,12 @@ const CONFIG_FIELDS: ConfigFieldDescriptor[] = [
 		label: 'Default browser',
 		kind: 'enum',
 		options: ['chromium', 'firefox', 'webkit'],
+	},
+	{
+		key: 'scanMode',
+		label: 'Scan mode',
+		kind: 'enum',
+		options: ['regex', 'graphify'],
 	},
 	{key: 'baseUrl', label: 'Base URL', kind: 'text', nullable: false},
 	{key: 'testCommand', label: 'Test command', kind: 'text', nullable: true},
@@ -384,7 +399,7 @@ Available Orbit commands:
 				// works from whatever map (if any) was already on disk.
 				try {
 					context.setAgentActivity('Scanning project for changes...');
-					const projectMap = await scanProjectWithModeSelection(
+					const {projectMap, graphifyOutcome} = await scanProjectWithModeSelection(
 						context.project.root,
 						{
 							requestApproval: context.requestApproval,
@@ -393,6 +408,14 @@ Available Orbit commands:
 						},
 					);
 					writeProjectMap(context.project.root, projectMap);
+
+					const graphifyMessage = graphifyOutcomeMessage(graphifyOutcome);
+					if (graphifyMessage) {
+						context.setMessages(previous => [
+							...previous,
+							{role: 'agent', ...graphifyMessage},
+						]);
+					}
 				} catch (error) {
 					reportError(context.setMessages, {
 						kind: 'unexpected',
@@ -505,7 +528,7 @@ Available Orbit commands:
 			try {
 				context.setIsThinking(true);
 
-				const projectMap = await scanProjectWithModeSelection(
+				const {projectMap, graphifyOutcome} = await scanProjectWithModeSelection(
 					context.project.root,
 					{
 						requestApproval: context.requestApproval,
@@ -517,6 +540,14 @@ Available Orbit commands:
 					context.project.root,
 					projectMap,
 				);
+
+				const graphifyMessage = graphifyOutcomeMessage(graphifyOutcome);
+				if (graphifyMessage) {
+					context.setMessages(previous => [
+						...previous,
+						{role: 'agent', ...graphifyMessage},
+					]);
+				}
 
 				context.setMessages(previous => [
 					...previous,
@@ -685,12 +716,24 @@ Available Orbit commands:
 			try {
 				context.setIsThinking(true);
 				context.setAgentActivity('Scanning project for changes...');
-				projectMap = await scanProjectWithModeSelection(context.project.root, {
-					requestApproval: context.requestApproval,
-					requestScanMode: context.requestScanMode,
-					setMessages: context.setMessages,
-				});
+				const scanResult = await scanProjectWithModeSelection(
+					context.project.root,
+					{
+						requestApproval: context.requestApproval,
+						requestScanMode: context.requestScanMode,
+						setMessages: context.setMessages,
+					},
+				);
+				projectMap = scanResult.projectMap;
 				writeProjectMap(context.project.root, projectMap);
+
+				const graphifyMessage = graphifyOutcomeMessage(scanResult.graphifyOutcome);
+				if (graphifyMessage) {
+					context.setMessages(previous => [
+						...previous,
+						{role: 'agent', ...graphifyMessage},
+					]);
+				}
 			} catch (error) {
 				reportError(context.setMessages, {
 					kind: 'unexpected',

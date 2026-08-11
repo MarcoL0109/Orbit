@@ -15,7 +15,10 @@ import {
 	getGhostCompletion,
 } from './commands/autocomplete.js';
 import {formatScanResult, writeProjectMap} from './projects/scan.js';
-import {scanProjectWithModeSelection} from './projects/scanOrchestration.js';
+import {
+	scanProjectWithModeSelection,
+	graphifyOutcomeMessage,
+} from './projects/scanOrchestration.js';
 import {
 	deinitLocalContext,
 	getProjectPath,
@@ -220,14 +223,72 @@ export function App({initialPrompt}: AppProps) {
 	}
 
 	const handleProjectSelect = (item: any) => {
-		setSelectedProjectOption(item.value);
-		if (selectedProjectOption === 'exit') {
+		// Branch on item.value directly, not the selectedProjectOption state —
+		// setSelectedProjectOption below doesn't take effect until the next
+		// render, so reading the state here would only ever see the PREVIOUS
+		// selection, not this one.
+		if (item.value === 'exit') {
 			process.exit(0);
 		}
 
-		if (selectedProjectOption === 'quit') {
+		if (item.value === 'quit') {
 			setSelectProjectMode(false);
+			setSelectedProjectOption('');
+			return;
 		}
+
+		if (item.value === 'add') {
+			setSelectedProjectOption(item.value);
+			return;
+		}
+
+		// Otherwise item.value is the name of an already-tracked project.
+		const matched = readGlobalProjects().projects.find(
+			knownProject => knownProject.name === item.value,
+		);
+
+		if (!matched) {
+			setMessages(previous => [
+				...previous,
+				{
+					role: 'system',
+					content: `Could not find a tracked project named "${item.value}".`,
+					color: 'red',
+				},
+			]);
+			setSelectProjectMode(false);
+			setSelectedProjectOption('');
+			return;
+		}
+
+		const detected = detectProjectRoot(matched.path);
+		setProject(detected);
+
+		if (detected.isProject) {
+			rememberProject({
+				name: matched.name,
+				path: matched.path,
+				framework: matched.framework,
+				packageManager: matched.packageManager,
+				testFramework: matched.testFramework,
+				description: matched.description,
+				primaryFeatures: matched.primaryFeatures,
+				lastScannedAt: matched.lastScannedAt,
+			});
+		}
+
+		setMessages(previous => [
+			...previous,
+			{
+				role: 'system',
+				content: detected.isProject
+					? `Switched to project: ${detected.root}`
+					: `"${matched.name}" (${matched.path}) no longer looks like a valid project.`,
+				color: detected.isProject ? 'green' : 'red',
+			},
+		]);
+		setSelectProjectMode(false);
+		setSelectedProjectOption('');
 	};
 
 	const constructProjectOptions = () => {
@@ -347,7 +408,8 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 	};
 
 	const handleProjectPath = () => {
-		setMessages([
+		setMessages(previous => [
+			...previous,
 			{
 				role: 'system',
 				content: `Received Project Path: ${inputPath}`,
@@ -365,11 +427,12 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 		} else {
 			const checkProject = detectProjectRoot(res.path);
 			if (checkProject.isProject) {
+				setProject(checkProject);
 				setMessages(previous => [
 					...previous,
 					{
 						role: 'system',
-						content: `Project detected: ${checkProject.root}`,
+						content: `Switched to project: ${checkProject.root}`,
 					},
 				]);
 			} else {
@@ -391,9 +454,21 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 	const handleConfirmNameInit = async () => {
 		if (!project) return;
 
+		// Unmount the "confirm your project name" TextInput immediately,
+		// before any of the async init/scan work below starts — it must
+		// not still be mounted (and listening for Enter) once the
+		// scan-mode SelectInput renders later in this same flow, or a
+		// keypress meant for that select can also re-trigger this
+		// TextInput's onSubmit, firing this whole function a second time
+		// (confirmed: this is exactly what caused the scan-mode prompt to
+		// be asked twice in one /init run).
+		setCheckName(false);
+		setConfirmName('');
+
 		setIsInitting(true);
 
 		let initSucceeded = false;
+		let initResultFiles: InitFileAction[] = [];
 
 		try {
 			const result = initOrbitProject({
@@ -403,6 +478,7 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 				packageManager: project.packageManager,
 				testFramework: project.testFramework,
 			});
+			initResultFiles = result.files;
 
 			rememberProject({
 				name: confirmName,
@@ -412,17 +488,6 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 				testFramework: project.testFramework ?? null,
 				lastScannedAt: null,
 			});
-
-			setMessages(previous => [
-				...previous,
-				{
-					role: 'agent',
-					content: `${formatInitResult(result.files)}
-Global memory updated:
-✓ ~/.orbit/projects.json`,
-					color: 'green',
-				},
-			]);
 
 			setProject?.(previous =>
 				previous
@@ -441,33 +506,77 @@ Global memory updated:
 			});
 		}
 
-		// Kept as its own try/catch: init already succeeded and .orbit already
-		// exists at this point, so a scan failure here is a different problem
-		// from an init failure and should be reported as such.
-		if (initSucceeded && project.root) {
-			try {
-				const projectMap = await scanProjectWithModeSelection(project.root, {
-					requestApproval,
-					requestScanMode,
-					setMessages,
-				});
-				const projectMapPath = writeProjectMap(project.root, projectMap);
+		if (initSucceeded) {
+			// The scan (and its graphify sub-step) runs BEFORE the init
+			// success message is sent, specifically so graphify's own
+			// build/update summary — when graphify runs — can be folded
+			// directly into that one message instead of trailing in as an
+			// unrelated-looking separate line. Kept as its own try/catch:
+			// init already succeeded and .orbit already exists at this
+			// point, so a scan failure here is a different problem from an
+			// init failure — the init message still gets sent below either
+			// way, just without a graphify line to fold in.
+			let graphifyMessage: {content: string; color: string} | null = null;
+
+			if (project.root) {
+				try {
+					const {projectMap, graphifyOutcome} =
+						await scanProjectWithModeSelection(project.root, {
+							requestApproval,
+							requestScanMode,
+							setMessages,
+						});
+					const projectMapPath = writeProjectMap(project.root, projectMap);
+					graphifyMessage = graphifyOutcomeMessage(graphifyOutcome);
+
+					setMessages(previous => [
+						...previous,
+						{
+							role: 'agent',
+							content: `${formatInitResult(initResultFiles)}${
+								graphifyMessage ? `\n${graphifyMessage.content}\n` : ''
+							}
+Global memory updated:
+✓ ~/.orbit/projects.json`,
+							color: 'green',
+						},
+						{
+							role: 'agent',
+							content: formatScanResult(projectMap, projectMapPath),
+							color: 'green',
+						},
+					]);
+				} catch (error) {
+					setMessages(previous => [
+						...previous,
+						{
+							role: 'agent',
+							content: `${formatInitResult(initResultFiles)}
+Global memory updated:
+✓ ~/.orbit/projects.json`,
+							color: 'green',
+						},
+					]);
+					reportError(setMessages, {
+						kind: 'post-init-scan-failed',
+						cause: error,
+					});
+				}
+			} else {
 				setMessages(previous => [
 					...previous,
 					{
 						role: 'agent',
-						content: formatScanResult(projectMap, projectMapPath),
+						content: `${formatInitResult(initResultFiles)}
+Global memory updated:
+✓ ~/.orbit/projects.json`,
 						color: 'green',
 					},
 				]);
-			} catch (error) {
-				reportError(setMessages, {kind: 'post-init-scan-failed', cause: error});
 			}
 		}
 
 		setIsInitting(false);
-		setCheckName(false);
-		setConfirmName('');
 	};
 
 	const handleConfirmDeinit = (item: any) => {
