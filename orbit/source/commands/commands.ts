@@ -10,7 +10,11 @@ import {
 } from '../ai/agent.js';
 import {runEnvironmentSetupAgent} from '../ai/environmentSetupAgent.js';
 import {writeAgentSession, writeManualInputTestRecords} from '../ai/session.js';
-import {readOrbitConfig} from '../init/config.js';
+import {
+	readOrbitConfig,
+	writeOrbitConfig,
+	type OrbitConfig,
+} from '../init/config.js';
 import {
 	readEnvironmentSetupInstructions,
 	writeEnvironmentSetupInstructions,
@@ -29,6 +33,64 @@ import {isReachable, waitUntilReachable} from '../projects/reachability.js';
 import {cleanupTrackedProcesses} from '../projects/processTracking.js';
 import type {CommandContext} from './context.js';
 import {reportError, type ArgCountRule} from './error.js';
+
+// /config's editable fields — deliberately a subset of OrbitConfig.
+// scanMode already has its own flow (/scan's picker); dockerComposeFile and
+// dockerComposeHasHealthchecks are auto-detected facts, not preferences;
+// testDir/manualTestDir are conventions other code paths assume are stable.
+// Everything below is a genuine per-project preference someone would
+// otherwise open .orbit/config.json by hand to change.
+type ConfigFieldDescriptor =
+	| {key: 'approvalMode'; label: string; kind: 'enum'; options: string[]}
+	| {key: 'writeMode'; label: string; kind: 'enum'; options: string[]}
+	| {key: 'defaultBrowser'; label: string; kind: 'enum'; options: string[]}
+	| {key: 'baseUrl'; label: string; kind: 'text'; nullable: false}
+	| {key: 'testCommand'; label: string; kind: 'text'; nullable: true}
+	| {key: 'maxRepairAttempts'; label: string; kind: 'number'}
+	| {key: 'devCommands'; label: string; kind: 'csv'};
+
+const CONFIG_FIELDS: ConfigFieldDescriptor[] = [
+	{
+		key: 'approvalMode',
+		label: 'Approval mode',
+		kind: 'enum',
+		options: ['ask', 'always'],
+	},
+	{
+		key: 'writeMode',
+		label: 'Write mode',
+		kind: 'enum',
+		options: ['ask', 'always'],
+	},
+	{
+		key: 'defaultBrowser',
+		label: 'Default browser',
+		kind: 'enum',
+		options: ['chromium', 'firefox', 'webkit'],
+	},
+	{key: 'baseUrl', label: 'Base URL', kind: 'text', nullable: false},
+	{key: 'testCommand', label: 'Test command', kind: 'text', nullable: true},
+	{key: 'maxRepairAttempts', label: 'Max repair attempts', kind: 'number'},
+	{key: 'devCommands', label: 'Dev commands', kind: 'csv'},
+];
+
+function formatConfigFieldValue(
+	config: OrbitConfig,
+	field: ConfigFieldDescriptor,
+): string {
+	const value = config[field.key];
+	if (value === null) return '(none)';
+	if (Array.isArray(value))
+		return value.length > 0 ? value.join(', ') : '(none)';
+	return String(value);
+}
+
+function formatConfigSummary(config: OrbitConfig): string {
+	const lines = CONFIG_FIELDS.map(
+		field => `${field.label}: ${formatConfigFieldValue(config, field)}`,
+	);
+	return `Current configuration:\n${lines.join('\n')}`;
+}
 
 export type OrbitCommand = {
 	name: string;
@@ -61,6 +123,7 @@ Available Orbit commands:
 /init       Initialize Orbit for this project
 /deinit     Delete the .orbit folder within the current project
 /scan       Build index and context for the current project
+/config     View and change project configuration
 /test       Generate and run a Playwright test for a feature you describe
 /coverage   Show routes and components that don't have a matching test
 /projects   Show remembered projects
@@ -471,6 +534,133 @@ Available Orbit commands:
 				});
 			} finally {
 				context.setIsThinking(false);
+			}
+		},
+	},
+	{
+		name: 'config',
+		description: 'View and change project configuration',
+		usage: '/config',
+		argsRule: {exact: 0},
+		async handler(_args, context) {
+			if (!context.project?.root) {
+				reportError(context.setMessages, {kind: 'no-project-selected'});
+				return;
+			}
+
+			const projectRoot = context.project.root;
+			let orbitConfig = context.project.hasOrbitFolder
+				? readOrbitConfig(projectRoot)
+				: null;
+
+			if (!orbitConfig) {
+				reportError(context.setMessages, {kind: 'project-not-initialized'});
+				return;
+			}
+
+			context.setMessages(previous => [
+				...previous,
+				{role: 'agent', content: formatConfigSummary(orbitConfig!)},
+			]);
+
+			// eslint-disable-next-line no-constant-condition
+			while (true) {
+				// Snapshotted once per iteration so the closures below (map,
+				// setMessages) don't capture the `let`-reassigned outer
+				// binding itself, only this iteration's fixed value.
+				const configThisIteration = orbitConfig;
+				const fieldOptions: Array<{label: string; value: string}> =
+					CONFIG_FIELDS.map(field => ({
+						label: `${field.label} (${formatConfigFieldValue(configThisIteration, field)})`,
+						value: field.key,
+					}));
+				fieldOptions.push({label: 'Done', value: '__done__'});
+
+				const chosenKey = await context.requestSelect(
+					'Which setting do you want to change?',
+					fieldOptions,
+				);
+
+				if (chosenKey === '__done__') {
+					return;
+				}
+
+				const field = CONFIG_FIELDS.find(f => f.key === chosenKey);
+				if (!field) continue;
+
+				let nextConfig: OrbitConfig | null = null;
+
+				if (field.kind === 'enum') {
+					const picked = await context.requestSelect(
+						`New value for ${field.label}:`,
+						field.options.map(option => ({label: option, value: option})),
+					);
+					nextConfig = {...orbitConfig, [field.key]: picked};
+				} else {
+					const typed = await context.requestInput(
+						field.kind === 'csv'
+							? `New value for ${field.label} (comma-separated, e.g. "npm run dev, docker compose up"):`
+							: `New value for ${field.label}:`,
+					);
+
+					if (typed === null) {
+						continue;
+					}
+
+					if (field.kind === 'number') {
+						const parsed = Number(typed);
+						if (!Number.isInteger(parsed) || parsed <= 0) {
+							context.setMessages(previous => [
+								...previous,
+								{
+									role: 'agent',
+									content: `"${typed}" isn't a valid positive integer — ${field.label} left unchanged.`,
+									color: 'red',
+								},
+							]);
+							continue;
+						}
+
+						nextConfig = {...orbitConfig, [field.key]: parsed};
+					} else if (field.kind === 'csv') {
+						const items = typed
+							.split(',')
+							.map(item => item.trim())
+							.filter(Boolean);
+						nextConfig = {...orbitConfig, [field.key]: items};
+					} else {
+						const trimmed = typed.trim();
+						if (trimmed === '' && !field.nullable) {
+							context.setMessages(previous => [
+								...previous,
+								{
+									role: 'agent',
+									content: `${field.label} can't be empty — left unchanged.`,
+									color: 'red',
+								},
+							]);
+							continue;
+						}
+
+						nextConfig = {
+							...orbitConfig,
+							[field.key]: trimmed === '' ? null : trimmed,
+						};
+					}
+				}
+
+				writeOrbitConfig(projectRoot, nextConfig);
+				orbitConfig = nextConfig;
+				const updatedConfig = nextConfig;
+
+				context.setMessages(previous => [
+					...previous,
+					{
+						role: 'agent',
+						content: `${field.label} updated to ${formatConfigFieldValue(updatedConfig, field)}.`,
+						color: 'green',
+					},
+				]);
 			}
 		},
 	},

@@ -19,6 +19,12 @@ export type ApiCall = {
 	body?: string;
 };
 
+export type WebSocketMessage = {
+	url: string;
+	direction: 'sent' | 'received';
+	payload: string;
+};
+
 export type BrowserWorkerResponse =
 	| {
 			ok: true;
@@ -35,6 +41,12 @@ export type BrowserWorkerResponse =
 			// is visible from the DOM snapshot alone.
 			apiCalls?: ApiCall[];
 			consoleErrors?: string[];
+			// Same scoping as apiCalls — a real-time app (live scores, chat,
+			// broadcasts) can drive most of its actual behavior over a
+			// WebSocket instead of XHR/fetch, which apiCalls never sees at
+			// all. A 'received' frame with data the DOM doesn't reflect is the
+			// same rendering-bug signal as an unrendered 2xx apiCall.
+			webSocketMessages?: WebSocketMessage[];
 	  }
 	| {ok: false; error: string};
 
@@ -81,9 +93,18 @@ let page = null;
 let lastSnapshot = null;
 let pendingApiCalls = [];
 let pendingConsoleErrors = [];
+let pendingWebSocketMessages = [];
 
-const MAX_RESPONSE_BODY_CHARS = 2000;
+const MAX_CAPTURED_TEXT_CHARS = 2000;
 const MAX_CAPTURED_PER_ACTION = 10;
+
+// WebSocket frame payloads can be binary (Buffer) — not meaningful to
+// stringify byte-for-byte, and a real-time app's meaningful traffic is
+// virtually always a text/JSON frame anyway.
+function payloadToText(payload) {
+  if (typeof payload === 'string') return payload.slice(0, MAX_CAPTURED_TEXT_CHARS);
+  return \`<binary frame, \${payload.length} bytes>\`;
+}
 
 async function ensureBrowser() {
   if (!browser) browser = await launchBrowser.launch();
@@ -132,6 +153,23 @@ async function ensurePage() {
       if (pendingConsoleErrors.length >= MAX_CAPTURED_PER_ACTION) return;
       pendingConsoleErrors.push(String(error));
     });
+
+    // Fires once per WebSocket the page opens (reconnects create a new one
+    // each time) — frame listeners are attached fresh per connection, same
+    // as the page-level listeners above are attached once per page.
+    page.on('websocket', (ws) => {
+      const url = ws.url();
+
+      ws.on('framesent', (frame) => {
+        if (pendingWebSocketMessages.length >= MAX_CAPTURED_PER_ACTION) return;
+        pendingWebSocketMessages.push({url, direction: 'sent', payload: payloadToText(frame.payload)});
+      });
+
+      ws.on('framereceived', (frame) => {
+        if (pendingWebSocketMessages.length >= MAX_CAPTURED_PER_ACTION) return;
+        pendingWebSocketMessages.push({url, direction: 'received', payload: payloadToText(frame.payload)});
+      });
+    });
   }
   return page;
 }
@@ -139,11 +177,13 @@ async function ensurePage() {
 // Drains whatever accumulated since the last call, resolving the deferred
 // response bodies now (not eagerly in the listener, so a request that's
 // still in flight when captured has a chance to finish first).
-async function drainCapturedErrors() {
+async function drainCapturedEvents() {
   const apiCalls = pendingApiCalls;
   const consoleErrors = pendingConsoleErrors;
+  const webSocketMessages = pendingWebSocketMessages;
   pendingApiCalls = [];
   pendingConsoleErrors = [];
+  pendingWebSocketMessages = [];
 
   const resolvedApiCalls = await Promise.all(
     apiCalls.map(async ({url, status, statusText, ok, bodyPromise}) => {
@@ -153,7 +193,7 @@ async function drainCapturedErrors() {
         status,
         statusText,
         ok,
-        body: body ? body.slice(0, MAX_RESPONSE_BODY_CHARS) : undefined,
+        body: body ? body.slice(0, MAX_CAPTURED_TEXT_CHARS) : undefined,
       };
     }),
   );
@@ -161,6 +201,7 @@ async function drainCapturedErrors() {
   return {
     apiCalls: resolvedApiCalls.length > 0 ? resolvedApiCalls : undefined,
     consoleErrors: consoleErrors.length > 0 ? consoleErrors : undefined,
+    webSocketMessages: webSocketMessages.length > 0 ? webSocketMessages : undefined,
   };
 }
 
@@ -191,12 +232,13 @@ async function actAndReport(action) {
   // shouldn't reappear attached to this one.
   pendingApiCalls = [];
   pendingConsoleErrors = [];
+  pendingWebSocketMessages = [];
   await action(p);
   await settle(p);
   const snapshot = await snapshotOf(p);
   const changed = snapshot !== lastSnapshot;
   lastSnapshot = snapshot;
-  const {apiCalls, consoleErrors} = await drainCapturedErrors();
+  const {apiCalls, consoleErrors, webSocketMessages} = await drainCapturedEvents();
   return {
     ok: true,
     url: p.url(),
@@ -205,6 +247,7 @@ async function actAndReport(action) {
     snapshot: changed ? snapshot : undefined,
     apiCalls,
     consoleErrors,
+    webSocketMessages,
   };
 }
 
@@ -225,8 +268,8 @@ async function handle(command) {
       // async request that only failed after the page had already
       // settled) would sit uncleared until the NEXT action's actAndReport
       // silently wipes it before it was ever reported.
-      const {apiCalls, consoleErrors} = await drainCapturedErrors();
-      return {ok: true, url: p.url(), title: await p.title(), snapshot, apiCalls, consoleErrors};
+      const {apiCalls, consoleErrors, webSocketMessages} = await drainCapturedEvents();
+      return {ok: true, url: p.url(), title: await p.title(), snapshot, apiCalls, consoleErrors, webSocketMessages};
     }
     case 'reset': {
       await ensureBrowser();
@@ -240,6 +283,7 @@ async function handle(command) {
       // action.
       pendingApiCalls = [];
       pendingConsoleErrors = [];
+      pendingWebSocketMessages = [];
       return {ok: true};
     }
     case 'close': {

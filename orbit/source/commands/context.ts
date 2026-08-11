@@ -51,6 +51,17 @@ export type CommandContext = {
 		whatWasDone: string,
 		output: string,
 	) => Promise<'success' | 'failure'>;
+	// Generic N-way select, resolving to the chosen option's value — used by
+	// /config for both picking which field to edit and picking a new value
+	// for an enum field. Deliberately separate from the bespoke
+	// pendingApproval/pendingScanMode/pendingOutcomeConfirmation prompts
+	// (each has its own fixed option set and wording baked in); this one
+	// exists because /config needs two different N-way choices, not because
+	// those existing ones should be rebuilt on top of it.
+	requestSelect: (
+		prompt: string,
+		options: Array<{label: string; value: string}>,
+	) => Promise<string>;
 	setAgentActivity: React.Dispatch<React.SetStateAction<string | null>>;
 	// Keyed by project root, not a single flag — switching projects (/switch)
 	// shouldn't let one project's confirmed-ready state apply to another.

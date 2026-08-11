@@ -59,6 +59,11 @@ export function App({initialPrompt}: AppProps) {
 		prompt: string;
 		resolve: (value: string | null) => void;
 	} | null>(null);
+	const [pendingSelect, setPendingSelect] = useState<{
+		prompt: string;
+		options: Array<{label: string; value: string}>;
+		resolve: (value: string) => void;
+	} | null>(null);
 	const [pendingInputValue, setPendingInputValue] = useState<string>('');
 	const [agentActivity, setAgentActivity] = useState<string | null>(null);
 	const currentAbortControllerRef = useRef<AbortController | null>(null);
@@ -173,6 +178,20 @@ export function App({initialPrompt}: AppProps) {
 	function handleOutcomeConfirmationSelect(item: any) {
 		pendingOutcomeConfirmation?.resolve(item.value);
 		setPendingOutcomeConfirmation(null);
+	}
+
+	async function requestSelect(
+		prompt: string,
+		options: Array<{label: string; value: string}>,
+	): Promise<string> {
+		return new Promise(resolve => {
+			setPendingSelect({prompt, options, resolve});
+		});
+	}
+
+	function handleSelectChoice(item: any) {
+		pendingSelect?.resolve(item.value);
+		setPendingSelect(null);
 	}
 
 	async function requestInput(prompt: string): Promise<string | null> {
@@ -293,6 +312,7 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 			requestInput,
 			requestScanMode,
 			requestOutcomeConfirmation,
+			requestSelect,
 			setAgentActivity,
 			isEnvironmentReady,
 			markEnvironmentReady,
@@ -574,6 +594,7 @@ Global memory updated:
 			pendingApproval ||
 			pendingScanMode ||
 			pendingOutcomeConfirmation ||
+			pendingSelect ||
 			pendingInput ? (
 				<Box marginTop={1}>
 					<Text color="yellow">
@@ -701,6 +722,16 @@ Global memory updated:
 							{label: 'Failure', value: 'failure'},
 						]}
 						onSelect={handleOutcomeConfirmationSelect}
+					/>
+				</Box>
+			)}
+
+			{pendingSelect && (
+				<Box flexDirection="column">
+					<Text color="yellow">{pendingSelect.prompt}</Text>
+					<SelectInput
+						items={pendingSelect.options}
+						onSelect={handleSelectChoice}
 					/>
 				</Box>
 			)}
