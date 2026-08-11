@@ -1,44 +1,44 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { OrbitConfig } from './config.js';
+import {OrbitConfig} from './config.js';
 
 type InitOrbitProjectOptions = {
-  projectRoot: string;
-  projectName: string;
-  framework?: string;
-  packageManager?: string;
-  testFramework?: string;
+	projectRoot: string;
+	projectName: string;
+	framework?: string;
+	packageManager?: string;
+	testFramework?: string;
 };
 
 export type InitFileAction = {
-  filePath: string;
-  relativePath: string;
-  action: 'created' | 'skipped';
+	filePath: string;
+	relativePath: string;
+	action: 'created' | 'skipped';
 };
 
 type PackageJsonForPortDetection = {
-  scripts?: Record<string, string>;
-  dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
+	scripts?: Record<string, string>;
+	dependencies?: Record<string, string>;
+	devDependencies?: Record<string, string>;
 };
 
 // Checked most-specific-first: frameworks that are themselves built on Vite
 // (SvelteKit) are matched before the generic 'vite' dependency, so they get
 // their own port rather than always falling through to Vite's default.
 const FRAMEWORK_DEFAULT_PORTS: Array<{dependency: string; port: number}> = [
-  {dependency: 'next', port: 3000},
-  {dependency: '@sveltejs/kit', port: 5173},
-  {dependency: '@angular/core', port: 4200},
-  {dependency: '@vue/cli-service', port: 8080},
-  {dependency: 'vite', port: 5173},
+	{dependency: 'next', port: 3000},
+	{dependency: '@sveltejs/kit', port: 5173},
+	{dependency: '@angular/core', port: 4200},
+	{dependency: '@vue/cli-service', port: 8080},
+	{dependency: 'vite', port: 5173},
 ];
 
 function readJsonFile<T>(filePath: string): T | null {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
-  } catch {
-    return null;
-  }
+	try {
+		return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
+	} catch {
+		return null;
+	}
 }
 
 // Common places a frontend's own package.json lives in a split/monorepo
@@ -55,34 +55,49 @@ const FRONTEND_SUBFOLDER_CANDIDATES = ['Frontend', 'frontend', 'client', 'web'];
 // caller can move on to the next candidate directory instead of locking in
 // a default before checking a subfolder that might have a real answer.
 function detectPortFromDirectory(dir: string): number | null {
-  const packageJson = readJsonFile<PackageJsonForPortDetection>(path.join(dir, 'package.json'));
+	const packageJson = readJsonFile<PackageJsonForPortDetection>(
+		path.join(dir, 'package.json'),
+	);
 
-  const devScript = packageJson?.scripts?.['dev'] ?? packageJson?.scripts?.['start'] ?? '';
-  const scriptPortMatch = devScript.match(/(?:--port|-p)[=\s]+(\d{2,5})/) ?? devScript.match(/\bPORT=(\d{2,5})/);
-  if (scriptPortMatch?.[1]) {
-    return Number(scriptPortMatch[1]);
-  }
+	const devScript =
+		packageJson?.scripts?.['dev'] ?? packageJson?.scripts?.['start'] ?? '';
+	const scriptPortMatch =
+		/(?:--port|-p)[=\s]+(\d{2,5})/.exec(devScript) ??
+		/\bPORT=(\d{2,5})/.exec(devScript);
+	if (scriptPortMatch?.[1]) {
+		return Number(scriptPortMatch[1]);
+	}
 
-  for (const envFile of ['.env.local', '.env']) {
-    const envPath = path.join(dir, envFile);
-    if (!fs.existsSync(envPath)) continue;
+	for (const envFile of ['.env.local', '.env']) {
+		const envPath = path.join(dir, envFile);
+		if (!fs.existsSync(envPath)) continue;
 
-    const match = fs.readFileSync(envPath, 'utf8').match(/^PORT=(\d{2,5})/m);
-    if (match?.[1]) return Number(match[1]);
-  }
+		const match = /^PORT=(\d{2,5})/m.exec(fs.readFileSync(envPath, 'utf8'));
+		if (match?.[1]) return Number(match[1]);
+	}
 
-  const deps = {...(packageJson?.dependencies ?? {}), ...(packageJson?.devDependencies ?? {})};
-  const frameworkMatch = FRAMEWORK_DEFAULT_PORTS.find(({dependency}) => dependency in deps);
-  if (frameworkMatch) return frameworkMatch.port;
+	const deps = {
+		...packageJson?.dependencies,
+		...packageJson?.devDependencies,
+	};
+	const frameworkMatch = FRAMEWORK_DEFAULT_PORTS.find(
+		({dependency}) => dependency in deps,
+	);
+	if (frameworkMatch) return frameworkMatch.port;
 
-  return null;
+	return null;
 }
 
-const COMPOSE_FILE_CANDIDATES = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'];
+const COMPOSE_FILE_CANDIDATES = [
+	'docker-compose.yml',
+	'docker-compose.yaml',
+	'compose.yml',
+	'compose.yaml',
+];
 
 type DockerComposeDetection = {
-  file: string | null;
-  hasHealthchecks: boolean;
+	file: string | null;
+	hasHealthchecks: boolean;
 };
 
 const FRONTEND_SERVICE_NAME_HINTS = ['frontend', 'web', 'client', 'ui', 'app'];
@@ -95,60 +110,74 @@ const FRONTEND_SERVICE_NAME_HINTS = ['frontend', 'web', 'client', 'ui', 'app'];
 // grabbing the first port found anywhere would just as easily return one of
 // those instead of the one a browser actually needs to hit. Standard 2-space
 // compose indentation is assumed; anything else silently finds nothing here.
-function detectDockerComposeFrontendPort(composeFilePath: string): number | null {
-  let content: string;
-  try {
-    content = fs.readFileSync(composeFilePath, 'utf8');
-  } catch {
-    return null;
-  }
+function detectDockerComposeFrontendPort(
+	composeFilePath: string,
+): number | null {
+	let content: string;
+	try {
+		content = fs.readFileSync(composeFilePath, 'utf8');
+	} catch {
+		return null;
+	}
 
-  let inFrontendLikeService = false;
+	let inFrontendLikeService = false;
 
-  for (const line of content.split('\n')) {
-    // Top-level key (e.g. "volumes:" after the services block) always exits
-    // whatever service block preceded it.
-    if (/^\S/.test(line)) {
-      inFrontendLikeService = false;
-      continue;
-    }
+	for (const line of content.split('\n')) {
+		// Top-level key (e.g. "volumes:" after the services block) always exits
+		// whatever service block preceded it.
+		if (/^\S/.test(line)) {
+			inFrontendLikeService = false;
+			continue;
+		}
 
-    const serviceMatch = line.match(/^ {2}([A-Za-z0-9_.-]+):\s*(#.*)?$/);
-    if (serviceMatch) {
-      const name = serviceMatch[1]!.toLowerCase();
-      inFrontendLikeService = FRONTEND_SERVICE_NAME_HINTS.some((hint) => name.includes(hint));
-      continue;
-    }
+		const serviceMatch = /^ {2}([\w.-]+):\s*(#.*)?$/.exec(line);
+		if (serviceMatch) {
+			const name = serviceMatch[1]!.toLowerCase();
+			inFrontendLikeService = FRONTEND_SERVICE_NAME_HINTS.some(hint =>
+				name.includes(hint),
+			);
+			continue;
+		}
 
-    if (!inFrontendLikeService) continue;
+		if (!inFrontendLikeService) continue;
 
-    const portMatch = line.match(/^\s*-\s*["']?(\d{2,5}):(\d{2,5})["']?\s*(#.*)?$/);
-    if (portMatch?.[1]) {
-      return Number(portMatch[1]);
-    }
-  }
+		const portMatch = /^\s*-\s*["']?(\d{2,5}):(\d{2,5})["']?\s*(#.*)?$/.exec(
+			line,
+		);
+		if (portMatch?.[1]) {
+			return Number(portMatch[1]);
+		}
+	}
 
-  return null;
+	return null;
 }
 
 // A compose-mapped frontend port is checked first when available — it's the
 // actual host-reachable port for a containerized dev setup regardless of
 // what a service's own internal script/env thinks its port is (Compose can
 // remap it to anything). Falls through to the non-Docker signals otherwise.
-function detectDevServerPort(projectRoot: string, dockerCompose: DockerComposeDetection): number {
-  if (dockerCompose.file) {
-    const composePort = detectDockerComposeFrontendPort(path.join(projectRoot, dockerCompose.file));
-    if (composePort !== null) return composePort;
-  }
+function detectDevServerPort(
+	projectRoot: string,
+	dockerCompose: DockerComposeDetection,
+): number {
+	if (dockerCompose.file) {
+		const composePort = detectDockerComposeFrontendPort(
+			path.join(projectRoot, dockerCompose.file),
+		);
+		if (composePort !== null) return composePort;
+	}
 
-  const candidateDirs = [projectRoot, ...FRONTEND_SUBFOLDER_CANDIDATES.map((sub) => path.join(projectRoot, sub))];
+	const candidateDirs = [
+		projectRoot,
+		...FRONTEND_SUBFOLDER_CANDIDATES.map(sub => path.join(projectRoot, sub)),
+	];
 
-  for (const dir of candidateDirs) {
-    const port = detectPortFromDirectory(dir);
-    if (port !== null) return port;
-  }
+	for (const dir of candidateDirs) {
+		const port = detectPortFromDirectory(dir);
+		if (port !== null) return port;
+	}
 
-  return 3000;
+	return 3000;
 }
 
 // Detect-and-store only — no YAML parser dependency for what's just a
@@ -157,75 +186,80 @@ function detectDevServerPort(projectRoot: string, dockerCompose: DockerComposeDe
 // a line-anchored regex is a reasonable, dependency-free heuristic here;
 // a future phase that actually needs per-service detail can revisit this.
 function detectDockerCompose(projectRoot: string): DockerComposeDetection {
-  for (const candidate of COMPOSE_FILE_CANDIDATES) {
-    const fullPath = path.join(projectRoot, candidate);
-    if (!fs.existsSync(fullPath)) continue;
+	for (const candidate of COMPOSE_FILE_CANDIDATES) {
+		const fullPath = path.join(projectRoot, candidate);
+		if (!fs.existsSync(fullPath)) continue;
 
-    let hasHealthchecks = false;
-    try {
-      hasHealthchecks = /^\s*healthcheck:\s*$/m.test(fs.readFileSync(fullPath, 'utf8'));
-    } catch {
-      // File exists but couldn't be read — still report it as found, just
-      // without healthcheck info.
-    }
+		let hasHealthchecks = false;
+		try {
+			hasHealthchecks = /^\s*healthcheck:\s*$/m.test(
+				fs.readFileSync(fullPath, 'utf8'),
+			);
+		} catch {
+			// File exists but couldn't be read — still report it as found, just
+			// without healthcheck info.
+		}
 
-    return {file: candidate, hasHealthchecks};
-  }
+		return {file: candidate, hasHealthchecks};
+	}
 
-  return {file: null, hasHealthchecks: false};
+	return {file: null, hasHealthchecks: false};
 }
 
 export function initOrbitProject({
-  projectRoot,
-  projectName,
-  framework,
-  packageManager,
-  testFramework,
+	projectRoot,
+	projectName,
+	framework,
+	packageManager,
+	testFramework,
 }: InitOrbitProjectOptions) {
-  const now = new Date().toISOString();
-  const dockerCompose = detectDockerCompose(projectRoot);
+	const now = new Date().toISOString();
+	const dockerCompose = detectDockerCompose(projectRoot);
 
-  const orbitDir = path.join(projectRoot, '.orbit');
-  const indexDir = path.join(orbitDir, 'index');
-  const memoryDir = path.join(orbitDir, 'memory');
-  const sessionsDir = path.join(orbitDir, 'sessions');
-  const tracesDir = path.join(orbitDir, 'traces');
+	const orbitDir = path.join(projectRoot, '.orbit');
+	const indexDir = path.join(orbitDir, 'index');
+	const memoryDir = path.join(orbitDir, 'memory');
+	const sessionsDir = path.join(orbitDir, 'sessions');
+	const tracesDir = path.join(orbitDir, 'traces');
 
-  fs.mkdirSync(indexDir, {recursive: true});
-  fs.mkdirSync(memoryDir, {recursive: true});
-  fs.mkdirSync(sessionsDir, {recursive: true});
-  fs.mkdirSync(tracesDir, {recursive: true});
+	fs.mkdirSync(indexDir, {recursive: true});
+	fs.mkdirSync(memoryDir, {recursive: true});
+	fs.mkdirSync(sessionsDir, {recursive: true});
+	fs.mkdirSync(tracesDir, {recursive: true});
 
-  const files: InitFileAction[] = [
-    writeJsonIfMissing(projectRoot, path.join(orbitDir, 'project.json'), {
-      name: projectName,
-      root: projectRoot,
-      framework: framework ?? null,
-      packageManager: packageManager ?? null,
-      testFramework: testFramework ?? null,
-      createdAt: now,
-      updatedAt: now,
-    }),
+	const files: InitFileAction[] = [
+		writeJsonIfMissing(projectRoot, path.join(orbitDir, 'project.json'), {
+			name: projectName,
+			root: projectRoot,
+			framework: framework ?? null,
+			packageManager: packageManager ?? null,
+			testFramework: testFramework ?? null,
+			createdAt: now,
+			updatedAt: now,
+		}),
 
-    writeJsonIfMissing(projectRoot, path.join(orbitDir, 'config.json'), {
-      approvalMode: 'ask',
-      defaultBrowser: 'chromium',
-      baseUrl: `http://localhost:${detectDevServerPort(projectRoot, dockerCompose)}`,
-      devCommands: dockerCompose.file ? ['docker compose up'] : [],
-      testCommand: null,
-      testDir: 'Orbit_test/e2e',
-      manualTestDir: 'Orbit_test/user_input_test',
-      writeMode: 'ask',
-      maxRepairAttempts: 3,
-      dockerComposeFile: dockerCompose.file,
-      dockerComposeHasHealthchecks: dockerCompose.hasHealthchecks,
-      scanMode: null,
-    } satisfies OrbitConfig),
+		writeJsonIfMissing(projectRoot, path.join(orbitDir, 'config.json'), {
+			approvalMode: 'ask',
+			defaultBrowser: 'chromium',
+			baseUrl: `http://localhost:${detectDevServerPort(
+				projectRoot,
+				dockerCompose,
+			)}`,
+			devCommands: dockerCompose.file ? ['docker compose up'] : [],
+			testCommand: null,
+			testDir: 'Orbit_test/e2e',
+			manualTestDir: 'Orbit_test/user_input_test',
+			writeMode: 'ask',
+			maxRepairAttempts: 3,
+			dockerComposeFile: dockerCompose.file,
+			dockerComposeHasHealthchecks: dockerCompose.hasHealthchecks,
+			scanMode: null,
+		} satisfies OrbitConfig),
 
-    writeTextIfMissing(
-      projectRoot,
-      path.join(memoryDir, 'overview.md'),
-      `# Orbit Project Memory
+		writeTextIfMissing(
+			projectRoot,
+			path.join(memoryDir, 'overview.md'),
+			`# Orbit Project Memory
 
 ## Overview
 
@@ -242,12 +276,12 @@ Orbit was initialized for this project on ${now}.
 - Checkout
 - Dashboard
 `,
-    ),
+		),
 
-    writeTextIfMissing(
-      projectRoot,
-      path.join(memoryDir, 'decisions.md'),
-      `
+		writeTextIfMissing(
+			projectRoot,
+			path.join(memoryDir, 'decisions.md'),
+			`
 # Decisions
 
 ## Testing Strategy
@@ -257,89 +291,93 @@ Orbit was initialized for this project on ${now}.
 - Ask before creating or editing files.
 - Ask before running shell commands.
 `,
-    ),
+		),
 
-    writeTextIfMissing(
-      projectRoot,
-      path.join(memoryDir, 'failures.md'),
-      `
+		writeTextIfMissing(
+			projectRoot,
+			path.join(memoryDir, 'failures.md'),
+			`
 # Failure Memory
 
 Orbit will record useful test failure patterns here.
 
 Do not store secrets, passwords, tokens, or full raw logs.
 `,
-    ),
+		),
 
-    // Deliberately created empty, not pre-filled with placeholder/example
-    // prose: readEnvironmentSetupInstructions treats ANY non-empty file as
-    // user-documented instructions to follow directly instead of exploring
-    // — a non-empty default here would mean every freshly-init'd project
-    // looks "already documented" from the start, which both feeds the
-    // agent a generic example that doesn't match this specific project and
-    // permanently blocks the environment setup agent's own write-back
-    // (commands.ts only writes its discovered procedure here when this
-    // file was empty beforehand). The guidance for what to put here lives
-    // in the init summary message instead of the file itself.
-    writeTextIfMissing(projectRoot, path.join(memoryDir, 'environment_setup.md'), ''),
-  ];
+		// Deliberately created empty, not pre-filled with placeholder/example
+		// prose: readEnvironmentSetupInstructions treats ANY non-empty file as
+		// user-documented instructions to follow directly instead of exploring
+		// — a non-empty default here would mean every freshly-init'd project
+		// looks "already documented" from the start, which both feeds the
+		// agent a generic example that doesn't match this specific project and
+		// permanently blocks the environment setup agent's own write-back
+		// (commands.ts only writes its discovered procedure here when this
+		// file was empty beforehand). The guidance for what to put here lives
+		// in the init summary message instead of the file itself.
+		writeTextIfMissing(
+			projectRoot,
+			path.join(memoryDir, 'environment_setup.md'),
+			'',
+		),
+	];
 
-  return {
-    orbitDir,
-    projectJsonPath: path.join(orbitDir, 'project.json'),
-    configJsonPath: path.join(orbitDir, 'config.json'),
-    indexDir,
-    memoryDir,
-    sessionsDir,
-    tracesDir,
-    files,
-  };
+	return {
+		orbitDir,
+		projectJsonPath: path.join(orbitDir, 'project.json'),
+		configJsonPath: path.join(orbitDir, 'config.json'),
+		indexDir,
+		memoryDir,
+		sessionsDir,
+		tracesDir,
+		files,
+	};
 }
 
 function writeJsonIfMissing(
-  projectRoot: string,
-  filePath: string,
-  data: unknown,
+	projectRoot: string,
+	filePath: string,
+	data: unknown,
 ): InitFileAction {
-  const relativePath = path.relative(projectRoot, filePath);
+	const relativePath = path.relative(projectRoot, filePath);
 
-  if (fs.existsSync(filePath)) {
-    return {
-      filePath,
-      relativePath,
-      action: 'skipped',
-    };
-  }
+	if (fs.existsSync(filePath)) {
+		return {
+			filePath,
+			relativePath,
+			action: 'skipped',
+		};
+	}
 
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+	fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
 
-  return {
-    filePath,
-    relativePath,
-    action: 'created',
-  };
+	return {
+		filePath,
+		relativePath,
+		action: 'created',
+	};
 }
 
 function writeTextIfMissing(
-  projectRoot: string,
-  filePath: string,
-  content: string,
+	projectRoot: string,
+	filePath: string,
+	content: string,
 ): InitFileAction {
-  const relativePath = path.relative(projectRoot, filePath);
+	const relativePath = path.relative(projectRoot, filePath);
 
-  if (fs.existsSync(filePath)) {
-    return {
-      filePath,
-      relativePath,
-      action: 'skipped',
-    };
-  }
+	if (fs.existsSync(filePath)) {
+		return {
+			filePath,
+			relativePath,
+			action: 'skipped',
+		};
+	}
 
-  fs.writeFileSync(filePath, content, 'utf8');
+	fs.writeFileSync(filePath, content, 'utf8');
 
-  return {
-    filePath,
-    relativePath,
-    action: 'created',
-  };
+	return {
+		filePath,
+		relativePath,
+		action: 'created',
+	};
 }

@@ -1,22 +1,22 @@
 import {createOpenAIClient} from './client.js';
 
-
 type AskModelOptions = {
-  prompt: string;
-  model?: string;
-  signal?: AbortSignal;
+	prompt: string;
+	model?: string;
+	signal?: AbortSignal;
 };
 
 export async function askModel({
-  prompt,
-  model = 'gpt-5.2',
-  signal,
+	prompt,
+	model = 'gpt-5.2',
+	signal,
 }: AskModelOptions): Promise<string> {
-  const client = createOpenAIClient();
+	const client = createOpenAIClient();
 
-  const response = await client.responses.create({
-    model,
-    instructions: `You are Orbit, an AI QA agent for E2E testing.
+	const response = await client.responses.create(
+		{
+			model,
+			instructions: `You are Orbit, an AI QA agent for E2E testing.
 Your Job:
 - Perform E2E testing on features user mentioned in their prompt.
 - Analyse projects to identify as much features as possible in the user's project directory.
@@ -30,11 +30,12 @@ Rules:
 - Abort and report in case there is a need of security information needed in order to conduct the test (eg. API keys, secrets)
 - At any point, do not attempt to read or utilize any variables in the .env file without any approval
 `,
-    input: prompt,
-  },
-  {
-    signal,
-  });
+			input: prompt,
+		},
+		{
+			signal,
+		},
+	);
 
-  return response.output_text;
+	return response.output_text;
 }

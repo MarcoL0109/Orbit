@@ -15,6 +15,11 @@
 	"files": [
 		"dist"
 	],
+	"overrides": {
+		"xo": {
+			"eslint": "8.39.0"
+		}
+	},
 	"dependencies": {
 		"commander": "^15.0.0",
 		"dotenv": "^17.4.2",
@@ -56,14 +61,16 @@
 			"tsx": "module"
 		},
 		"nodeArguments": [
-			"--loader=ts-node/esm"
-		]
+			"--import=tsx/esm"
+		],
+		"workerThreads": false
 	},
 	"xo": {
 		"extends": "xo-react",
 		"prettier": true,
 		"rules": {
-			"react/prop-types": "off"
+			"react/prop-types": "off",
+			"@typescript-eslint/ban-types": "off"
 		}
 	},
 	"prettier": "@vdemedes/prettier-config"

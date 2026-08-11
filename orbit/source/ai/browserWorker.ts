@@ -1,47 +1,57 @@
-import { spawn } from 'node:child_process';
+import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 
 export type BrowserWorkerCommand =
-    | {action: 'navigate'; url: string}
-    | {action: 'click'; selector: string}
-    | {action: 'fill'; selector: string; value: string}
-    | {action: 'snapshot'}
-    | {action: 'reset'}
-    | {action: 'close'};
+	| {action: 'navigate'; url: string}
+	| {action: 'click'; selector: string}
+	| {action: 'fill'; selector: string; value: string}
+	| {action: 'snapshot'}
+	| {action: 'reset'}
+	| {action: 'close'};
 
-export type ApiCall = {url: string; status: number; statusText: string; ok: boolean; body?: string};
+export type ApiCall = {
+	url: string;
+	status: number;
+	statusText: string;
+	ok: boolean;
+	body?: string;
+};
 
 export type BrowserWorkerResponse =
-    | {
-        ok: true;
-        url?: string;
-        title?: string;
-        changed?: boolean;
-        snapshot?: string;
-        // Populated only when non-empty, scoped to what happened during
-        // THIS action specifically (cleared before, drained after) — not a
-        // running log. Every XHR/fetch response the page made (success or
-        // failure), not just failures — a 4xx/5xx entry is direct evidence
-        // of an app bug, but a 200 matters too: if it carries data the DOM
-        // doesn't show, that's a rendering bug, not a network one. Neither
-        // is visible from the DOM snapshot alone.
-        apiCalls?: ApiCall[];
-        consoleErrors?: string[];
-    }
-    | {ok: false; error: string};
+	| {
+			ok: true;
+			url?: string;
+			title?: string;
+			changed?: boolean;
+			snapshot?: string;
+			// Populated only when non-empty, scoped to what happened during
+			// THIS action specifically (cleared before, drained after) — not a
+			// running log. Every XHR/fetch response the page made (success or
+			// failure), not just failures — a 4xx/5xx entry is direct evidence
+			// of an app bug, but a 200 matters too: if it carries data the DOM
+			// doesn't show, that's a rendering bug, not a network one. Neither
+			// is visible from the DOM snapshot alone.
+			apiCalls?: ApiCall[];
+			consoleErrors?: string[];
+	  }
+	| {ok: false; error: string};
 
 export type BrowserWorkerHandle = {
-    send: (command: BrowserWorkerCommand) => Promise<BrowserWorkerResponse>;
-    isAlive: () => boolean;
-    close: () => void;
+	send: (command: BrowserWorkerCommand) => Promise<BrowserWorkerResponse>;
+	isAlive: () => boolean;
+	close: () => void;
 };
 
 const VALID_BROWSERS = new Set(['chromium', 'firefox', 'webkit']);
 
-function resolveBrowserName(defaultBrowser: string): 'chromium' | 'firefox' | 'webkit' {
-    return VALID_BROWSERS.has(defaultBrowser) ? (defaultBrowser as 'chromium' | 'firefox' | 'webkit') : 'chromium';
+function resolveBrowserName(
+	defaultBrowser: string,
+): 'chromium' | 'firefox' | 'webkit' {
+	return VALID_BROWSERS.has(defaultBrowser)
+		? (defaultBrowser as 'chromium' | 'firefox' | 'webkit')
+		: 'chromium';
 }
 
 // Generated into the target project's own .orbit/index/, so `import ...
@@ -56,8 +66,11 @@ function resolveBrowserName(defaultBrowser: string): 'chromium' | 'firefox' | 'w
 // checkout -> payment) keeps its session — 'reset' is the only thing that
 // tears the context down and starts clean, left to the caller to invoke at
 // feature boundaries, not page boundaries.
-function buildBrowserWorkerSource(browserName: 'chromium' | 'firefox' | 'webkit', baseUrl: string): string {
-    return `import { ${browserName} as launchBrowser } from 'playwright';
+function buildBrowserWorkerSource(
+	browserName: 'chromium' | 'firefox' | 'webkit',
+	baseUrl: string,
+): string {
+	return `import { ${browserName} as launchBrowser } from 'playwright';
 import readline from 'node:readline';
 
 const baseURL = ${JSON.stringify(baseUrl)};
@@ -266,65 +279,85 @@ rl.on('line', async (line) => {
 // Strictly sequential request/response over stdin/stdout — safe because the
 // agent loop only ever awaits one tool call at a time, so there's never more
 // than one in-flight command to correlate.
-export function spawnBrowserWorker(projectRoot: string, defaultBrowser: string, baseUrl: string): BrowserWorkerHandle {
-    const indexDir = path.join(projectRoot, '.orbit', 'index');
-    fs.mkdirSync(indexDir, {recursive: true});
+export function spawnBrowserWorker(
+	projectRoot: string,
+	defaultBrowser: string,
+	baseUrl: string,
+): BrowserWorkerHandle {
+	const indexDir = path.join(projectRoot, '.orbit', 'index');
+	fs.mkdirSync(indexDir, {recursive: true});
 
-    const workerPath = path.join(indexDir, 'browser-worker.mjs');
-    fs.writeFileSync(workerPath, buildBrowserWorkerSource(resolveBrowserName(defaultBrowser), baseUrl), 'utf8');
+	const workerPath = path.join(indexDir, 'browser-worker.mjs');
+	fs.writeFileSync(
+		workerPath,
+		buildBrowserWorkerSource(resolveBrowserName(defaultBrowser), baseUrl),
+		'utf8',
+	);
 
-    const child = spawn(process.execPath, [workerPath], {cwd: projectRoot, stdio: ['pipe', 'pipe', 'pipe']});
+	const child = spawn(process.execPath, [workerPath], {
+		cwd: projectRoot,
+		stdio: ['pipe', 'pipe', 'pipe'],
+	});
 
-    const rl = readline.createInterface({input: child.stdout});
-    const pending: Array<(response: BrowserWorkerResponse) => void> = [];
+	const rl = readline.createInterface({input: child.stdout});
+	const pending: Array<(response: BrowserWorkerResponse) => void> = [];
 
-    rl.on('line', (line) => {
-        const resolve = pending.shift();
-        if (!resolve) return;
+	rl.on('line', line => {
+		const resolve = pending.shift();
+		if (!resolve) return;
 
-        try {
-            resolve(JSON.parse(line) as BrowserWorkerResponse);
-        } catch {
-            resolve({ok: false, error: 'Malformed response from browser worker'});
-        }
-    });
+		try {
+			resolve(JSON.parse(line) as BrowserWorkerResponse);
+		} catch {
+			resolve({ok: false, error: 'Malformed response from browser worker'});
+		}
+	});
 
-    let dead = false;
-    child.on('exit', () => {
-        dead = true;
-        while (pending.length > 0) {
-            pending.shift()?.({ok: false, error: 'Browser worker exited unexpectedly'});
-        }
-    });
-    child.on('error', () => {
-        dead = true;
-    });
+	let dead = false;
+	child.on('exit', () => {
+		dead = true;
+		while (pending.length > 0) {
+			pending.shift()?.({
+				ok: false,
+				error: 'Browser worker exited unexpectedly',
+			});
+		}
+	});
+	child.on('error', () => {
+		dead = true;
+	});
 
-    return {
-        send: (command) => {
-            if (dead) {
-                return Promise.resolve({ok: false, error: 'Browser worker is no longer running'});
-            }
+	return {
+		async send(command) {
+			if (dead) {
+				return {
+					ok: false,
+					error: 'Browser worker is no longer running',
+				};
+			}
 
-            return new Promise((resolve) => {
-                pending.push(resolve);
-                child.stdin.write(JSON.stringify(command) + '\n');
-            });
-        },
-        isAlive: () => !dead,
-        close: () => {
-            if (dead) return;
+			return new Promise(resolve => {
+				pending.push(resolve);
+				child.stdin.write(JSON.stringify(command) + '\n');
+			});
+		},
+		isAlive: () => !dead,
+		close() {
+			if (dead) return;
 
-            try {
-                child.stdin.write(JSON.stringify({action: 'close'} satisfies BrowserWorkerCommand) + '\n');
-            } catch {
-                // Already gone — nothing to signal.
-            }
+			try {
+				child.stdin.write(
+					JSON.stringify({action: 'close'} satisfies BrowserWorkerCommand) +
+						'\n',
+				);
+			} catch {
+				// Already gone — nothing to signal.
+			}
 
-            // Hard-kill fallback in case the worker doesn't exit on its own.
-            setTimeout(() => {
-                if (!dead) child.kill();
-            }, 2000);
-        },
-    };
+			// Hard-kill fallback in case the worker doesn't exit on its own.
+			setTimeout(() => {
+				if (!dead) child.kill();
+			}, 2000);
+		},
+	};
 }

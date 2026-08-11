@@ -1,65 +1,81 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import React, {useEffect, useState, useRef} from 'react';
+import {Box, Text, useInput} from 'ink';
 import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
-import { detectProjectRoot } from './projects/search.js';
-import { validateProjectPath } from './projects/path.js';
 import SelectInput from 'ink-select-input';
-import { rememberProject } from "./registry/knownProjects.js";
-import { initOrbitProject } from "./init/init.js";
-import type { InitFileAction } from './init/init.js';
-import type { Message, ProjectOptions, ProjectInfo } from './commands/context.js'
-import { runCommand } from './commands/runCommand.js';
-import { getBestCommandCompletion, getGhostCompletion } from './commands/autocomplete.js';
-import { formatScanResult } from './projects/scan.js';
-import { readGlobalProjects } from './registry/knownProjects.js';
-import { writeProjectMap } from './projects/scan.js';
-import { scanProjectWithModeSelection } from './projects/scanOrchestration.js';
-import { deinitLocalContext, getProjectPath, deinitGlobalContext } from './init/deinit.js';
-import { reportError } from './commands/error.js';
-
-
+import {detectProjectRoot} from './projects/search.js';
+import {validateProjectPath} from './projects/path.js';
+import {rememberProject, readGlobalProjects} from './registry/knownProjects.js';
+import {initOrbitProject} from './init/init.js';
+import type {InitFileAction} from './init/init.js';
+import type {Message, ProjectOptions, ProjectInfo} from './commands/context.js';
+import {runCommand} from './commands/runCommand.js';
+import {
+	getBestCommandCompletion,
+	getGhostCompletion,
+} from './commands/autocomplete.js';
+import {formatScanResult, writeProjectMap} from './projects/scan.js';
+import {scanProjectWithModeSelection} from './projects/scanOrchestration.js';
+import {
+	deinitLocalContext,
+	getProjectPath,
+	deinitGlobalContext,
+} from './init/deinit.js';
+import {reportError} from './commands/error.js';
 
 type AppProps = {
-	initialPrompt?: string;
-}
+	readonly initialPrompt?: string;
+};
 
-
-export function App({ initialPrompt }: AppProps) {
+export function App({initialPrompt}: AppProps) {
 	const [messages, setMessages] = useState<Message[]>([]);
-	const [query, setQuery] = useState<string>("");
+	const [query, setQuery] = useState<string>('');
 	const [isBooting, setIsBooting] = useState<boolean>(true);
 	const [isThinking, setIsThinking] = useState<boolean>(false);
 	const [isInitting, setIsInitting] = useState<boolean>(false);
 	const [project, setProject] = useState<ProjectInfo | null>(null);
 	const [selectProjectMode, setSelectProjectMode] = useState<boolean>(false);
 	const [projectOptions, setProjectOptions] = useState<ProjectOptions[]>([]);
-	const [selectedProjectOption, setSelectedProjectOption] = useState<string>("");
-	const [inputPath, setInputPath] = useState<string>("");
+	const [selectedProjectOption, setSelectedProjectOption] =
+		useState<string>('');
+	const [inputPath, setInputPath] = useState<string>('');
 	const [checkName, setCheckName] = useState<boolean>(false);
 	const [confirmDeinit, setConfirmDeinit] = useState<boolean>(false);
-	const [confirmName, setConfirmName] = useState<string>("");
-	const [pendingApproval, setPendingApproval] = useState<{description: string; resolve: (approved: boolean) => void} | null>(null);
-	const [pendingScanMode, setPendingScanMode] = useState<{resolve: (mode: 'regex' | 'graphify') => void} | null>(null);
-	const [pendingOutcomeConfirmation, setPendingOutcomeConfirmation] = useState<{feature: string; whatWasDone: string; output: string; resolve: (outcome: 'success' | 'failure') => void} | null>(null);
-	const [pendingInput, setPendingInput] = useState<{prompt: string; resolve: (value: string | null) => void} | null>(null);
-	const [pendingInputValue, setPendingInputValue] = useState<string>("");
+	const [confirmName, setConfirmName] = useState<string>('');
+	const [pendingApproval, setPendingApproval] = useState<{
+		description: string;
+		resolve: (approved: boolean) => void;
+	} | null>(null);
+	const [pendingScanMode, setPendingScanMode] = useState<{
+		resolve: (mode: 'regex' | 'graphify') => void;
+	} | null>(null);
+	const [pendingOutcomeConfirmation, setPendingOutcomeConfirmation] = useState<{
+		feature: string;
+		whatWasDone: string;
+		output: string;
+		resolve: (outcome: 'success' | 'failure') => void;
+	} | null>(null);
+	const [pendingInput, setPendingInput] = useState<{
+		prompt: string;
+		resolve: (value: string | null) => void;
+	} | null>(null);
+	const [pendingInputValue, setPendingInputValue] = useState<string>('');
 	const [agentActivity, setAgentActivity] = useState<string | null>(null);
 	const currentAbortControllerRef = useRef<AbortController | null>(null);
 	const readyEnvironmentsRef = useRef<Set<string>>(new Set());
 	const ghostCompletetion = getGhostCompletion(query);
-	const confirmationOptions = [{label: "Confirm", value: "confirm"}, {label: "Cancel", value: "cancel"}]
-
+	const confirmationOptions = [
+		{label: 'Confirm', value: 'confirm'},
+		{label: 'Cancel', value: 'cancel'},
+	];
 
 	function isEnvironmentReady(projectRoot: string): boolean {
 		return readyEnvironmentsRef.current.has(projectRoot);
 	}
 
-
 	function markEnvironmentReady(projectRoot: string): void {
 		readyEnvironmentsRef.current.add(projectRoot);
 	}
-
 
 	useInput((_input, key) => {
 		if (key.tab) {
@@ -77,24 +93,23 @@ export function App({ initialPrompt }: AppProps) {
 		}
 	});
 
-
 	useEffect(() => {
-    	async function bootOrbit() {
-      		setIsBooting(true);
+		async function bootOrbit() {
+			setIsBooting(true);
 
-      		const detectedProject = detectProjectRoot();
+			const detectedProject = detectProjectRoot();
 
-      		setProject(detectedProject);
+			setProject(detectedProject);
 
-      		if (detectedProject.isProject && detectedProject.root) {
+			if (detectedProject.isProject && detectedProject.root) {
 				setSelectProjectMode(false);
-        		setMessages([
+				setMessages([
 					{
 						role: 'system',
 						content: `Project detected: ${detectedProject.root}`,
 					},
-        		]);
-      		} else {
+				]);
+			} else {
 				const options = constructProjectOptions();
 				setProjectOptions(options);
 				setSelectProjectMode(true);
@@ -102,15 +117,16 @@ export function App({ initialPrompt }: AppProps) {
 					{
 						role: 'system',
 						content:
-						'No project detected in this directory. You can still ask Orbit to choose a recent project later.',
+							'No project detected in this directory. You can still ask Orbit to choose a recent project later.',
 					},
 				]);
-      		}
-      		setIsBooting(false);
-    	}
-    	bootOrbit();
-	}, []);
+			}
 
+			setIsBooting(false);
+		}
+
+		bootOrbit();
+	}, []);
 
 	function startAbortableTask() {
 		const controller = new AbortController();
@@ -118,57 +134,52 @@ export function App({ initialPrompt }: AppProps) {
 		return controller;
 	}
 
-
 	function clearAbortableTask() {
 		currentAbortControllerRef.current = null;
 	}
 
-
-	function requestApproval(description: string): Promise<boolean> {
-		return new Promise((resolve) => {
+	async function requestApproval(description: string): Promise<boolean> {
+		return new Promise(resolve => {
 			setPendingApproval({description, resolve});
 		});
 	}
-
 
 	function handleApprovalSelect(item: any) {
 		pendingApproval?.resolve(item.value === 'approve');
 		setPendingApproval(null);
 	}
 
-
-	function requestScanMode(): Promise<'regex' | 'graphify'> {
-		return new Promise((resolve) => {
+	async function requestScanMode(): Promise<'regex' | 'graphify'> {
+		return new Promise(resolve => {
 			setPendingScanMode({resolve});
 		});
 	}
-
 
 	function handleScanModeSelect(item: any) {
 		pendingScanMode?.resolve(item.value);
 		setPendingScanMode(null);
 	}
 
-
-	function requestOutcomeConfirmation(feature: string, whatWasDone: string, output: string): Promise<'success' | 'failure'> {
-		return new Promise((resolve) => {
+	async function requestOutcomeConfirmation(
+		feature: string,
+		whatWasDone: string,
+		output: string,
+	): Promise<'success' | 'failure'> {
+		return new Promise(resolve => {
 			setPendingOutcomeConfirmation({feature, whatWasDone, output, resolve});
 		});
 	}
-
 
 	function handleOutcomeConfirmationSelect(item: any) {
 		pendingOutcomeConfirmation?.resolve(item.value);
 		setPendingOutcomeConfirmation(null);
 	}
 
-
-	function requestInput(prompt: string): Promise<string | null> {
-		return new Promise((resolve) => {
+	async function requestInput(prompt: string): Promise<string | null> {
+		return new Promise(resolve => {
 			setPendingInput({prompt, resolve});
 		});
 	}
-
 
 	function handleInputSubmit(value: string) {
 		pendingInput?.resolve(value.trim() || null);
@@ -176,11 +187,11 @@ export function App({ initialPrompt }: AppProps) {
 		setPendingInputValue('');
 	}
 
-
 	function abortCurrentTask() {
 		if (!currentAbortControllerRef.current) {
 			return false;
 		}
+
 		currentAbortControllerRef.current.abort();
 		currentAbortControllerRef.current = null;
 		setIsThinking(false);
@@ -189,24 +200,23 @@ export function App({ initialPrompt }: AppProps) {
 		return true;
 	}
 
-
 	const handleProjectSelect = (item: any) => {
 		setSelectedProjectOption(item.value);
 		if (selectedProjectOption === 'exit') {
 			process.exit(0);
 		}
+
 		if (selectedProjectOption === 'quit') {
 			setSelectProjectMode(false);
 		}
-	}
+	};
 
-	
 	const constructProjectOptions = () => {
 		const projectJsonList = readGlobalProjects();
-		const options = projectJsonList.projects.map((project) => ({
-							label: `->${project.name}`,
-							value: project.name,
-						}));
+		const options = projectJsonList.projects.map(project => ({
+			label: `->${project.name}`,
+			value: project.name,
+		}));
 		options.push({
 			label: '-> Add New Project',
 			value: 'add',
@@ -217,6 +227,7 @@ export function App({ initialPrompt }: AppProps) {
 				value: 'quit',
 			});
 		}
+
 		options.push({
 			label: '-> Quit Orbit',
 			value: 'exit',
@@ -224,19 +235,18 @@ export function App({ initialPrompt }: AppProps) {
 		return options;
 	};
 
-
 	function formatInitResult(files: InitFileAction[]) {
-		const created = files.filter((file) => file.action === 'created');
-		const skipped = files.filter((file) => file.action === 'skipped');
+		const created = files.filter(file => file.action === 'created');
+		const skipped = files.filter(file => file.action === 'skipped');
 		const createdText =
-		created.length > 0
-			? created.map((file) => `✓ ${file.relativePath}`).join('\n')
-			: 'None';
+			created.length > 0
+				? created.map(file => `✓ ${file.relativePath}`).join('\n')
+				: 'None';
 		const skippedText =
-		skipped.length > 0
-		? skipped.map((file) => `✗ ${file.relativePath}`).join('\n')
-		: 'None';
-	
+			skipped.length > 0
+				? skipped.map(file => `✗ ${file.relativePath}`).join('\n')
+				: 'None';
+
 		return `Orbit initialized this project.
 
 Created:
@@ -248,15 +258,14 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 `;
 	}
 
-
 	const handleSubmitQuery = async (value: string) => {
 		const prompt = value.trim();
 
 		if (!prompt) return;
 		setQuery('');
 
-		setMessages((prev) => [
-			...prev,
+		setMessages(previous => [
+			...previous,
 			{
 				role: 'user',
 				content: prompt,
@@ -277,8 +286,8 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 			setCheckName,
 			setConfirmName,
 			startAbortableTask,
-  			clearAbortableTask,
-  			abortCurrentTask,
+			clearAbortableTask,
+			abortCurrentTask,
 			setConfirmDeinit,
 			requestApproval,
 			requestInput,
@@ -294,28 +303,28 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 		}
 
 		if (isThinking) {
-			setMessages((prev) => [
-				...prev,
+			setMessages(previous => [
+				...previous,
 				{
 					role: 'agent',
-					content: "There is ongoing task Orbit is handling. You can use the /abort command to terminate previous task",
-					color: "red"
+					content:
+						'There is ongoing task Orbit is handling. You can use the /abort command to terminate previous task',
+					color: 'red',
 				},
 			]);
 			return;
 		}
 
 		setIsThinking(true);
-		setMessages((prev) => [
-			...prev,
+		setMessages(previous => [
+			...previous,
 			{
-			role: 'agent',
-			content: "This is a fake response from Orbit",
+				role: 'agent',
+				content: 'This is a fake response from Orbit',
 			},
 		]);
 		setIsThinking(false);
 	};
-
 
 	const handleProjectPath = () => {
 		setMessages([
@@ -326,8 +335,8 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 		]);
 		const res = validateProjectPath(inputPath);
 		if (!res.ok) {
-			setMessages((prev) => [
-				...prev,
+			setMessages(previous => [
+				...previous,
 				{
 					role: 'system',
 					content: `Project path ${res.path} does not exist`,
@@ -336,16 +345,16 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 		} else {
 			const checkProject = detectProjectRoot(res.path);
 			if (checkProject.isProject) {
-				setMessages((prev) => [
-					...prev,
+				setMessages(previous => [
+					...previous,
 					{
 						role: 'system',
 						content: `Project detected: ${checkProject.root}`,
 					},
 				]);
 			} else {
-				setMessages((prev) => [
-					...prev,
+				setMessages(previous => [
+					...previous,
 					{
 						role: 'system',
 						content: `Please ensure the path direct Orbit to a project`,
@@ -353,11 +362,11 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 				]);
 			}
 		}
-		setSelectProjectMode(false);
-		setInputPath("");
-		setSelectedProjectOption("");
-	}
 
+		setSelectProjectMode(false);
+		setInputPath('');
+		setSelectedProjectOption('');
+	};
 
 	const handleConfirmNameInit = async () => {
 		if (!project) return;
@@ -384,8 +393,8 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 				lastScannedAt: null,
 			});
 
-			setMessages((prev) => [
-				...prev,
+			setMessages(previous => [
+				...previous,
 				{
 					role: 'agent',
 					content: `${formatInitResult(result.files)}
@@ -395,17 +404,21 @@ Global memory updated:
 				},
 			]);
 
-			setProject?.((prev) =>
-				prev
+			setProject?.(previous =>
+				previous
 					? {
-						...prev,
-						hasOrbitFolder: true,
-					}
-					: prev,
+							...previous,
+							hasOrbitFolder: true,
+					  }
+					: previous,
 			);
 			initSucceeded = true;
 		} catch (error) {
-			reportError(setMessages, {kind: 'unexpected', action: 'Initializing Orbit context', cause: error});
+			reportError(setMessages, {
+				kind: 'unexpected',
+				action: 'Initializing Orbit context',
+				cause: error,
+			});
 		}
 
 		// Kept as its own try/catch: init already succeeded and .orbit already
@@ -419,8 +432,8 @@ Global memory updated:
 					setMessages,
 				});
 				const projectMapPath = writeProjectMap(project.root, projectMap);
-				setMessages((prev) => [
-					...prev,
+				setMessages(previous => [
+					...previous,
 					{
 						role: 'agent',
 						content: formatScanResult(projectMap, projectMapPath),
@@ -434,9 +447,8 @@ Global memory updated:
 
 		setIsInitting(false);
 		setCheckName(false);
-		setConfirmName("");
-	}
-
+		setConfirmName('');
+	};
 
 	const handleConfirmDeinit = (item: any) => {
 		if (item.value === 'confirm') {
@@ -449,11 +461,12 @@ Global memory updated:
 					setConfirmDeinit(false);
 					return;
 				}
+
 				const path = projectPath.route;
 				deinitLocalContext(path);
 				project.hasOrbitFolder = false;
-				setMessages((prev) => [
-					...prev,
+				setMessages(previous => [
+					...previous,
 					{
 						role: 'system',
 						content: `Orbit context of ${path} deleted successfully`,
@@ -463,8 +476,8 @@ Global memory updated:
 				if (project.root) {
 					const deinitGlobalRepsonse = deinitGlobalContext(project.root);
 					if (deinitGlobalRepsonse.ok) {
-						setMessages((prev) => [
-							...prev,
+						setMessages(previous => [
+							...previous,
 							{
 								role: 'system',
 								content: `Removed project from global orbit memory`,
@@ -475,232 +488,239 @@ Global memory updated:
 				}
 			}
 		}
+
 		setIsThinking(false);
 		setConfirmDeinit(false);
-	}
+	};
 
+	return (
+		<Box flexDirection="column">
+			<Box borderStyle="round" paddingX={1} flexDirection="column">
+				<Box justifyContent="space-between">
+					<Text bold>🪐 Orbit</Text>
+					<Text color="cyan">Interactive Mode</Text>
+				</Box>
 
-  return (
-    <Box flexDirection="column">
-      <Box borderStyle="round" paddingX={1} flexDirection="column">
-		<Box justifyContent="space-between">
-			<Text bold>🪐 Orbit</Text>
-			<Text color="cyan">Interactive Mode</Text>
-		</Box>
+				<Text>AI QA agent for E2E testing</Text>
 
-		<Text>AI QA agent for E2E testing</Text>
+				<Box marginTop={1} flexDirection="column">
+					{isBooting && (
+						<Text color="yellow">
+							<Spinner type="dots" /> Detecting project context...
+						</Text>
+					)}
 
-		<Box marginTop={1} flexDirection="column">
-			{isBooting && (
-			<Text color="yellow">
-				<Spinner type="dots" /> Detecting project context...
-			</Text>
-			)}
+					{!isBooting && project?.isProject && (
+						<>
+							<Text>
+								Project Path: <Text>{project.root}</Text>
+							</Text>
+							<Text>
+								Confidence: <Text color="green">{project.confidence}%</Text>
+							</Text>
+							<Text>
+								Stack:{' '}
+								<Text color="green">
+									{[
+										project.framework,
+										project.testFramework,
+										project.packageManager,
+									]
+										.filter(Boolean)
+										.join(' + ') || 'Unknown'}
+								</Text>
+							</Text>
+							<Text>
+								Orbit Context:{' '}
+								<Text color={project.hasOrbitFolder ? 'green' : 'red'}>
+									{project.hasOrbitFolder ? 'Initialized' : 'Not Initialized'}
+								</Text>
+							</Text>
+						</>
+					)}
 
-			{!isBooting && project?.isProject && (
-			<>
-				<Text>
-					Project Path: <Text>{project.root}</Text>
-				</Text>
-				<Text>
-					Confidence: <Text color="green">{project.confidence}%</Text>
-				</Text>
-				<Text>
-					Stack:{' '}
-					<Text color="green">
-						{[
-							project.framework,
-							project.testFramework,
-							project.packageManager,
-						]
-						.filter(Boolean)
-						.join(' + ') || 'Unknown'}
+					{!isBooting && !project?.isProject && (
+						<>
+							<Text color="red">No project detected</Text>
+							<Text>
+								Run Orbit inside a project or choose a recent project.
+							</Text>
+						</>
+					)}
+
+					<Text>
+						Approval: <Text color="yellow">Ask before write/run</Text>
 					</Text>
-				</Text>
-				<Text>
-					Orbit Context:{' '}
-					<Text color={project.hasOrbitFolder ? 'green' : 'red'}>
-						{project.hasOrbitFolder ? 'Initialized' : 'Not Initialized'}
-					</Text>
-				</Text>
-			</>
-			)}
-
-			{!isBooting && !project?.isProject && (
-			<>
-				<Text color="red">No project detected</Text>
-				<Text>Run Orbit inside a project or choose a recent project.</Text>
-			</>
-			)}
-
-			<Text>
-				Approval: <Text color="yellow">Ask before write/run</Text>
-			</Text>
-		</Box>
-		</Box>
-
-		<Box marginTop={1} flexDirection="column">
-			{messages.map((message, index) => (
-				<Text key={index} color={message.color || 'none'}>
-					{message.role === 'user'
-						? `You: ${message.content}`
-						: message.role === 'agent'
-						? `Orbit: ${message.content}`
-						: message.content}
-				</Text>
-			))}
-		</Box>
-
-		{isBooting || selectProjectMode || confirmDeinit || checkName || isInitting || pendingApproval || pendingScanMode || pendingOutcomeConfirmation || pendingInput ? (
-			<Box marginTop={1}>
-				<Text color="yellow">
-					<Spinner type="dots" /> Selection Menu In Progress...
-				</Text>
+				</Box>
 			</Box>
+
+			<Box marginTop={1} flexDirection="column">
+				{messages.map((message, index) => (
+					<Text key={index} color={message.color || 'none'}>
+						{message.role === 'user'
+							? `You: ${message.content}`
+							: message.role === 'agent'
+							? `Orbit: ${message.content}`
+							: message.content}
+					</Text>
+				))}
+			</Box>
+
+			{isBooting ||
+			selectProjectMode ||
+			confirmDeinit ||
+			checkName ||
+			isInitting ||
+			pendingApproval ||
+			pendingScanMode ||
+			pendingOutcomeConfirmation ||
+			pendingInput ? (
+				<Box marginTop={1}>
+					<Text color="yellow">
+						<Spinner type="dots" /> Selection Menu In Progress...
+					</Text>
+				</Box>
 			) : (
-			<Box marginTop={1}>
-				<Text color="cyan">{'> '}</Text>
-				<TextInput
-					value={query}
-					onChange={setQuery}
-					onSubmit={handleSubmitQuery}
-					placeholder="Ask Orbit to test something"
-				/>
-				{ghostCompletetion && (
-					<Text dimColor>{ghostCompletetion}</Text>
-				)}
-			</Box>
-		)}
+				<Box marginTop={1}>
+					<Text color="cyan">{'> '}</Text>
+					<TextInput
+						value={query}
+						placeholder="Ask Orbit to test something"
+						onChange={setQuery}
+						onSubmit={handleSubmitQuery}
+					/>
+					{ghostCompletetion && <Text dimColor>{ghostCompletetion}</Text>}
+				</Box>
+			)}
 
-		{
-			selectProjectMode && (
-			<Box flexDirection="column">
-				<Text>Select an option (Use arrow keys and Enter):</Text>
-				<SelectInput
-					items={projectOptions}
-					onSelect={handleProjectSelect}
-				/>
-			</Box>
-		)}
+			{selectProjectMode && (
+				<Box flexDirection="column">
+					<Text>Select an option (Use arrow keys and Enter):</Text>
+					<SelectInput items={projectOptions} onSelect={handleProjectSelect} />
+				</Box>
+			)}
 
-		{
-			selectedProjectOption === "add" &&
-			<Box marginTop={1}>
-				<TextInput
-					value={inputPath}
-					onChange={setInputPath}
-					onSubmit={handleProjectPath}
-					placeholder="Type Project Path (FROM HOME)"
-				/>
-			</Box>
-		}
+			{selectedProjectOption === 'add' && (
+				<Box marginTop={1}>
+					<TextInput
+						value={inputPath}
+						placeholder="Type Project Path (FROM HOME)"
+						onChange={setInputPath}
+						onSubmit={handleProjectPath}
+					/>
+				</Box>
+			)}
 
-		{
-			isInitting && (
+			{isInitting && (
 				<Text color="yellow">
 					<Spinner type="dots" /> Initializing Orbit Context...
 				</Text>
-			)
-		}
+			)}
 
-		{
-			checkName && (
-				<Box marginTop={1} flexDirection='column'>
+			{checkName && (
+				<Box marginTop={1} flexDirection="column">
 					<Text>The following name is detected. You can type in your own</Text>
 					<TextInput
 						value={confirmName}
+						placeholder="Your Project Name"
 						onChange={setConfirmName}
 						onSubmit={handleConfirmNameInit}
-						placeholder="Your Project Name"
 					/>
 				</Box>
-			)
-		}
+			)}
 
-		{
-			isThinking && (
+			{isThinking && (
 				<Text color="yellow">
 					<Spinner type="dots" /> {agentActivity ?? "Orbit's thinking..."}
 				</Text>
-			)
-		}
+			)}
 
-		{
-			confirmDeinit && (
+			{confirmDeinit && (
 				<Box flexDirection="column">
-					<Text color="red">Are you sure to deinit orbit context for this project. All context will be deleted after this</Text>
+					<Text color="red">
+						Are you sure to deinit orbit context for this project. All context
+						will be deleted after this
+					</Text>
 					<SelectInput
 						items={confirmationOptions}
 						onSelect={handleConfirmDeinit}
 					/>
 				</Box>
-			)
-		}
+			)}
 
-		{
-			pendingApproval && (
+			{pendingApproval && (
 				<Box flexDirection="column">
-					<Text color="yellow">Orbit wants to: {pendingApproval.description}</Text>
+					<Text color="yellow">
+						Orbit wants to: {pendingApproval.description}
+					</Text>
 					<SelectInput
-						items={[{label: "Approve", value: "approve"}, {label: "Deny", value: "deny"}]}
+						items={[
+							{label: 'Approve', value: 'approve'},
+							{label: 'Deny', value: 'deny'},
+						]}
 						onSelect={handleApprovalSelect}
 					/>
 				</Box>
-			)
-		}
+			)}
 
-		{
-			pendingScanMode && (
+			{pendingScanMode && (
 				<Box flexDirection="column">
-					<Text color="yellow">How should Orbit understand this project's code?</Text>
+					<Text color="yellow">
+						How should Orbit understand this project's code?
+					</Text>
 					<SelectInput
 						items={[
-							{label: "Regex — built-in heuristic scan, always available", value: "regex"},
-							{label: "Graphify — deeper AST-based knowledge graph, needs a separate install", value: "graphify"},
+							{
+								label: 'Regex — built-in heuristic scan, always available',
+								value: 'regex',
+							},
+							{
+								label:
+									'Graphify — deeper AST-based knowledge graph, needs a separate install',
+								value: 'graphify',
+							},
 						]}
 						onSelect={handleScanModeSelect}
 					/>
 				</Box>
-			)
-		}
+			)}
 
-		{
-			pendingOutcomeConfirmation && (
+			{pendingOutcomeConfirmation && (
 				<Box flexDirection="column">
-					<Text color="yellow">Orbit isn't sure whether this is a success or a failure — feature: {pendingOutcomeConfirmation.feature}</Text>
+					<Text color="yellow">
+						Orbit isn't sure whether this is a success or a failure — feature:{' '}
+						{pendingOutcomeConfirmation.feature}
+					</Text>
 					<Text bold>What it did:</Text>
 					<Text>{pendingOutcomeConfirmation.whatWasDone}</Text>
 					<Text bold>What happened:</Text>
 					<Text>{pendingOutcomeConfirmation.output}</Text>
 					<SelectInput
 						items={[
-							{label: "Success", value: "success"},
-							{label: "Failure", value: "failure"},
+							{label: 'Success', value: 'success'},
+							{label: 'Failure', value: 'failure'},
 						]}
 						onSelect={handleOutcomeConfirmationSelect}
 					/>
 				</Box>
-			)
-		}
+			)}
 
-		{
-			pendingInput && (
+			{pendingInput && (
 				<Box flexDirection="column">
 					<Text color="yellow">Orbit needs: {pendingInput.prompt}</Text>
 					<Text dimColor>(Press Esc to decline)</Text>
 					<TextInput
 						value={pendingInputValue}
+						placeholder="Type the value..."
 						onChange={setPendingInputValue}
 						onSubmit={handleInputSubmit}
-						placeholder="Type the value..."
 					/>
 				</Box>
-			)
-		}
+			)}
 
-		<Box marginTop={1}>
-			<Text color="red">Type '/exit' to quit</Text>
+			<Box marginTop={1}>
+				<Text color="red">Type '/exit' to quit</Text>
+			</Box>
 		</Box>
-    </Box>
-  );
+	);
 }

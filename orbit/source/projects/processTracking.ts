@@ -5,7 +5,7 @@
 const trackedPids = new Set<number>();
 
 export function trackProcess(pid: number): void {
-    trackedPids.add(pid);
+	trackedPids.add(pid);
 }
 
 // Best-effort, not something callers need to await or check — a PID that's
@@ -15,18 +15,19 @@ export function trackProcess(pid: number): void {
 // processes (a dev server started with a trailing &) are actually there to
 // kill by the time this runs.
 export function cleanupTrackedProcesses(): void {
-    for (const pid of trackedPids) {
-        try {
-            // Negative PID kills the whole process group — necessary
-            // because a bare `&` backgrounds a grandchild that detaches
-            // from Node's direct child reference, but stays in the same
-            // POSIX process group as long as that child was itself spawned
-            // with `detached: true` (see runCommand.ts). Killing just the
-            // direct child's own PID would miss it entirely.
-            process.kill(-pid, 'SIGTERM');
-        } catch {
-            // Already exited — nothing to do.
-        }
-    }
-    trackedPids.clear();
+	for (const pid of trackedPids) {
+		try {
+			// Negative PID kills the whole process group — necessary
+			// because a bare `&` backgrounds a grandchild that detaches
+			// from Node's direct child reference, but stays in the same
+			// POSIX process group as long as that child was itself spawned
+			// with `detached: true` (see runCommand.ts). Killing just the
+			// direct child's own PID would miss it entirely.
+			process.kill(-pid, 'SIGTERM');
+		} catch {
+			// Already exited — nothing to do.
+		}
+	}
+
+	trackedPids.clear();
 }
