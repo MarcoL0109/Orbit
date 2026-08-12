@@ -184,12 +184,32 @@ function summarizeKnownClassifications(projectRoot: string): string {
 // Purely additive context — nothing here is enforced in code, it's the
 // project's own accumulated notes and conventions, handed to the model as
 // background before it writes anything.
-function summarizeMemory(memory: ProjectMemory): string {
+// Exported for /memory to reuse — the exact same formatting the agent
+// itself reads its project memory through, not a second, possibly
+// drifting, copy of the same thing.
+export type MemorySections = {
+	overview?: boolean;
+	decisions?: boolean;
+	failures?: boolean;
+};
+
+// Defaults to all three — the agent's own call site never passes a second
+// argument, so its behavior is unchanged. /memory passes an explicit
+// include set when the user filters by flag.
+export function summarizeMemory(
+	memory: ProjectMemory,
+	include: MemorySections = {overview: true, decisions: true, failures: true},
+): string {
 	const sections = [
-		memory.overview && `## Project overview\n${memory.overview}`,
-		memory.decisions &&
+		include.overview &&
+			memory.overview &&
+			`## Project overview\n${memory.overview}`,
+		include.decisions &&
+			memory.decisions &&
 			`## Testing decisions and conventions\n${memory.decisions}`,
-		memory.failures && `## Known failure patterns\n${memory.failures}`,
+		include.failures &&
+			memory.failures &&
+			`## Known failure patterns\n${memory.failures}`,
 	].filter(Boolean);
 
 	return sections.length > 0

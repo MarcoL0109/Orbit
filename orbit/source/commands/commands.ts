@@ -7,6 +7,8 @@ import {
 	runTestingAgent,
 	formatAgentRunResult,
 	describeAgentActivity,
+	summarizeMemory,
+	type MemorySections,
 } from '../ai/agent.js';
 import {runEnvironmentSetupAgent} from '../ai/environmentSetupAgent.js';
 import {writeAgentSession, writeManualInputTestRecords} from '../ai/session.js';
@@ -16,6 +18,7 @@ import {
 	type OrbitConfig,
 } from '../init/config.js';
 import {
+	readProjectMemory,
 	readEnvironmentSetupInstructions,
 	writeEnvironmentSetupInstructions,
 } from '../init/memory.js';
@@ -142,7 +145,7 @@ Available Orbit commands:
 /test       Generate and run a Playwright test for a feature you describe
 /coverage   Show routes and components that don't have a matching test
 /projects   Show remembered projects
-/memory     Show project memory
+/memory     Show project memory (--overview / --decisions / --failures to filter, default all)
 /clear      Clear the screen
 /abort      Abort ongoing tasks that is currently running
 /exit       Exit Orbit`,
@@ -693,6 +696,60 @@ Available Orbit commands:
 					},
 				]);
 			}
+		},
+	},
+	{
+		name: 'memory',
+		description: 'Show project memory',
+		usage: '/memory [--overview] [--decisions] [--failures]',
+		argsRule: {min: 0},
+		handler(_args, context) {
+			if (!context.project?.root) {
+				reportError(context.setMessages, {kind: 'no-project-selected'});
+				return;
+			}
+
+			if (!context.project.hasOrbitFolder) {
+				reportError(context.setMessages, {kind: 'project-not-initialized'});
+				return;
+			}
+
+			const flagToSection: Record<string, keyof MemorySections> = {
+				'--overview': 'overview',
+				'--decisions': 'decisions',
+				'--failures': 'failures',
+			};
+
+			const unknownFlags = _args.filter(arg => !(arg in flagToSection));
+			if (unknownFlags.length > 0) {
+				context.setMessages(previous => [
+					...previous,
+					{
+						role: 'system',
+						content: `Unknown flag(s): ${unknownFlags.join(
+							', ',
+						)}. Valid flags: --overview, --decisions, --failures.`,
+						color: 'red',
+					},
+				]);
+				return;
+			}
+
+			// No flags at all -> show every section, same as before flags
+			// existed. Any flags given -> show only what was asked for.
+			const noFlags = _args.length === 0;
+			const include: MemorySections = {
+				overview: noFlags || _args.includes('--overview'),
+				decisions: noFlags || _args.includes('--decisions'),
+				failures: noFlags || _args.includes('--failures'),
+			};
+
+			const memory = readProjectMemory(context.project.root);
+
+			context.setMessages(previous => [
+				...previous,
+				{role: 'agent', content: summarizeMemory(memory, include)},
+			]);
 		},
 	},
 	{
