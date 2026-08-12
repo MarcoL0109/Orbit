@@ -67,6 +67,7 @@ Shows which routes and components still have no test at all.
 | `/test <description>` | Generate and run a Playwright test for the feature you describe |
 | `/scan` | Refresh the project index (routes, components, tests, config) |
 | `/coverage` | List routes/components with no matching test |
+| `/config` | Allow user to switch their Orbit settings via terminal (also supports direct file modifications)
 | `/projects` | Show every project Orbit has been initialized in |
 | `/switch` | Switch Orbit to a different project |
 | `/abort` (aliases: `/cancel`, `/stop`) | Abort the current running task |
