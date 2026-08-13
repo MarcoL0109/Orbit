@@ -19,6 +19,7 @@ AI QA agent for project scanning, test planning, and E2E automation
 * Asks for your help on anything it has no way to do itself (a 2FA code, an email verification link)
 * Keeps a per-project knowledge graph (optional, via [graphify](https://github.com/Graphify-Labs/graphify)) so it can understand how code connects without opening every file
 * Tracks feature coverage — which routes and components have a matching test and which don't
+* Runs headlessly from a CI pipeline (`--ci`) — same agent, no interactive prompts, exits with a pass/fail status code
 
 Every file write, shell command, and test run is approval-gated by default — you see exactly what Orbit is about to do before it does it.
 
@@ -32,7 +33,13 @@ cd orbit
 
 This installs dependencies, builds the CLI, and adds `orbit` to your `PATH` (via `~/.orbit/bin`). Restart your terminal, then run `orbit` from inside any project.
 
-You'll need an OpenAI API key — either exported as `OPENAI_API_KEY`, or in a `.env` file in Orbit's own directory during development.
+You'll need an OpenAI API key. `install.sh` prompts for one interactively (input is hidden) and persists it as `export OPENAI_API_KEY="..."` in your shell profile — skipped automatically if the key's already set or already configured from a previous install. If you skip the prompt, set it yourself:
+
+```bash
+export OPENAI_API_KEY="your_key_here"
+```
+
+(A `.env` file in Orbit's own directory also works, but only when running Orbit's source directly during development — not for the installed CLI or CI use, both of which need a real exported environment variable.)
 
 ## Quick start
 
@@ -107,6 +114,33 @@ Every `/test` and `/scan` keeps a project index fresh. There are two scan modes,
 * **Graphify** — builds an actual AST-based code knowledge graph via [graphify](https://github.com/Graphify-Labs/graphify) (tree-sitter under the hood, no LLM calls for the base extraction). This is what powers the `explain_symbol` tool. If graphify isn't installed when you pick this mode, Orbit offers to install it (`uv`/`pipx`/`pip`, whichever's available) — with your approval first.
 
 Either way, the regular scan still runs — graphify mode adds to it, it never replaces it.
+
+## CI mode
+
+```bash
+orbit "user can sign up" --ci
+```
+
+Runs the exact same testing agent headlessly — no interactive UI, no prompts — and exits with a status code a pipeline can gate on: `0` if every feature passed, `1` if the agent ran but a feature failed, `2` if it couldn't run at all (bad project, misconfigured, unreachable). The description must be a single quoted argument — an unquoted multi-word description arrives as separate words with no way to tell it apart from several arguments, so `--ci` rejects it with a corrected example rather than guessing.
+
+Three things CI mode deliberately does *not* do, unlike interactive `/test`:
+
+* **Won't run with `approvalMode`/`writeMode` still `"ask"`.** There's no human to answer an approval prompt in a pipeline — set both to `"always"` first via `/config` (interactively, once), or `--ci` refuses to start.
+* **Won't auto-start your dev environment.** It only checks `baseUrl` is already reachable and fails clearly if not — bring your app up in an earlier pipeline step, the same way CI conventionally does. (Interactive `/test`'s auto-setup agent runs arbitrary shell commands to discover a startup sequence; that's a different risk profile in an unattended CI runner than on your own machine.)
+* **Won't let an uncertain result pass silently.** If the agent can't confidently tell whether something worked (interactively, this is what `confirm_outcome` asks you about), CI mode auto-resolves it as a failure — clearly logged as auto-resolved, not silently swallowed — rather than optimistically letting an unconfirmed result go green.
+
+CI-generated tests are written to their own `Orbit_test/orbit-ci/` folder — kept separate from the interactive `testDir` (`Orbit_test/e2e` by default) so a pipeline run never mixes its output in with tests you wrote or reviewed by hand.
+
+Example GitHub Actions step:
+
+```yaml
+- name: Run Orbit test
+  run: orbit "user can sign up" --ci
+  env:
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+Orbit doesn't generate or manage this file itself — `--ci` just gives any CI system (GitHub Actions, GitLab CI, Jenkins, ...) a normal exit-code contract to run against.
 
 ## `.orbit/` — per-project context
 

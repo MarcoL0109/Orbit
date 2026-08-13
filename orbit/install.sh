@@ -44,7 +44,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
 EOF
 fi
 
-ECHO "Initialized the Orbit Configuration File"
+echo "Initialized the Orbit Configuration File"
 
 # For testing purposes, I need to command the file checking if-statement in case we want to overwrite the project json file
 # if [ ! -f "$PROJECT_FILE" ]; then
@@ -55,7 +55,7 @@ cat > "$PROJECT_FILE" << EOF
 EOF
 # fi
 
-ECHO "Initialized the Orbit Project File"
+echo "Initialized the Orbit Project File"
 
 if [ ! -f "$PREFERENCE_FILE" ]; then
   cat > "$PREFERENCE_FILE" << 'EOF'
@@ -74,7 +74,7 @@ if [ ! -f "$PREFERENCE_FILE" ]; then
 - Explain risky changes before applying them.
 EOF
 fi
-ECHO "Initialized the Orbit Preference File"
+echo "Initialized the Orbit Preference File"
 
 cat > "$GLOBAL_ORBIT_BIN" << EOF
 #!/usr/bin/env bash
@@ -101,6 +101,35 @@ if ! grep -q 'export PATH="$HOME/.orbit/bin:$PATH"' "$PROFILE" 2>/dev/null; then
   echo '' >> "$PROFILE"
   echo '# Orbit CLI' >> "$PROFILE"
   echo 'export PATH="$HOME/.orbit/bin:$PATH"' >> "$PROFILE"
+fi
+
+# Orbit's testing agent needs an OpenAI API key at runtime. Skip asking if
+# it's already available one way or another — either set in this shell
+# already, or persisted from a previous install run — so re-running
+# install.sh is idempotent and never re-prompts. Only prompts when stdin is
+# an actual interactive terminal ([ -t 0 ]); a non-interactive install
+# (piped, scripted, CI) just gets the manual instructions instead of
+# hanging on a read that will never receive input.
+if [ -n "$OPENAI_API_KEY" ]; then
+  echo "OPENAI_API_KEY is already set in your environment."
+elif grep -q '^export OPENAI_API_KEY=' "$PROFILE" 2>/dev/null; then
+  echo "OPENAI_API_KEY is already configured in $PROFILE."
+elif [ -t 0 ]; then
+  echo ""
+  read -r -s -p "Enter your OpenAI API key (used by Orbit's testing agent — press Enter to skip): " ENTERED_API_KEY
+  echo ""
+  if [ -n "$ENTERED_API_KEY" ]; then
+    echo '' >> "$PROFILE"
+    echo '# Orbit OpenAI API key' >> "$PROFILE"
+    echo "export OPENAI_API_KEY=\"$ENTERED_API_KEY\"" >> "$PROFILE"
+    echo "Saved to $PROFILE."
+  else
+    echo "Skipped. Set it later with:"
+    echo '  export OPENAI_API_KEY="your_key_here"'
+  fi
+else
+  echo "OPENAI_API_KEY is not set. Set it before using Orbit:"
+  echo '  export OPENAI_API_KEY="your_key_here"'
 fi
 
 echo ""

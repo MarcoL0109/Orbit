@@ -5,6 +5,7 @@ import {render} from 'ink';
 import {Command} from 'commander';
 import {App} from './app.js';
 import {cleanupTrackedProcesses} from './projects/processTracking.js';
+import {runCi} from './ci.js';
 import 'dotenv/config.js';
 
 // Safety net for abrupt termination (Ctrl-C, a parent process killing this
@@ -27,10 +28,40 @@ program
 
 program
 	.argument('[prompt...]', 'What you want Orbit to test')
-	.action((promptParts: string[]) => {
-		const initialPrompt = promptParts.join(' ').trim();
+	.option(
+		'--ci',
+		'Run headlessly for CI: execute once, print the result, exit with a pass/fail status code — no interactive UI',
+	)
+	.action(async (promptParts: string[], options: {ci?: boolean}) => {
+		const prompt = promptParts.join(' ').trim();
 
-		render(<App initialPrompt={initialPrompt || undefined} />);
+		if (options.ci) {
+			if (!prompt) {
+				console.error(
+					'orbit --ci requires a feature description, e.g. orbit "user can sign up" --ci',
+				);
+				process.exit(2);
+			}
+
+			// A quoted description arrives as a single shell word — commander
+			// only ever sees more than one promptParts entry when the shell
+			// split it apart, which happens exactly when it wasn't quoted.
+			// This can't be detected after the fact for a genuinely
+			// single-word description (quoted or not, it looks identical by
+			// the time Node sees it) — nothing to enforce there anyway, since
+			// there's no space for the shell to have split on.
+			if (promptParts.length > 1) {
+				console.error(
+					`orbit --ci requires the feature description to be a single quoted argument — it arrived as ${promptParts.length} separate words instead, which means it wasn't quoted. Wrap it in quotes:\n  orbit "${prompt}" --ci`,
+				);
+				process.exit(2);
+			}
+
+			const exitCode = await runCi(prompt);
+			process.exit(exitCode);
+		}
+
+		render(<App initialPrompt={prompt || undefined} />);
 	});
 
 program
