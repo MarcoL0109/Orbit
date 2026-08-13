@@ -46,7 +46,7 @@ export function writeManualInputTestRecords(
 	// written before manualTestDir existed.
 	const manualTestDir = path.resolve(
 		projectRoot,
-		orbitConfig.manualTestDir ?? 'Orbit_test/user_input_test',
+		orbitConfig.manualTestDir ?? 'Orbit-test/user_input_test',
 	);
 	fs.mkdirSync(manualTestDir, {recursive: true});
 

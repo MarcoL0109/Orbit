@@ -135,8 +135,9 @@ fi
 echo ""
 echo "Orbit installed."
 echo ""
-echo "Restart your terminal or run:"
-echo '  export PATH="$HOME/.orbit/bin:$PATH"'
+echo "This terminal won't see the PATH or API key changes yet — $PROFILE only"
+echo "gets read when a shell starts. Restart your terminal, or run:"
+echo "  source $PROFILE"
 echo ""
 echo "Then call:"
 echo "  orbit"

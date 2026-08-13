@@ -129,7 +129,7 @@ Three things CI mode deliberately does *not* do, unlike interactive `/test`:
 * **Won't auto-start your dev environment.** It only checks `baseUrl` is already reachable and fails clearly if not — bring your app up in an earlier pipeline step, the same way CI conventionally does. (Interactive `/test`'s auto-setup agent runs arbitrary shell commands to discover a startup sequence; that's a different risk profile in an unattended CI runner than on your own machine.)
 * **Won't let an uncertain result pass silently.** If the agent can't confidently tell whether something worked (interactively, this is what `confirm_outcome` asks you about), CI mode auto-resolves it as a failure — clearly logged as auto-resolved, not silently swallowed — rather than optimistically letting an unconfirmed result go green.
 
-CI-generated tests are written to their own `Orbit_test/orbit-ci/` folder — kept separate from the interactive `testDir` (`Orbit_test/e2e` by default) so a pipeline run never mixes its output in with tests you wrote or reviewed by hand.
+CI-generated tests are written to their own `.orbit/orbit-ci/` folder — kept separate from the interactive `testDir` (`Orbit-test/e2e` by default) so a pipeline run never mixes its output in with tests you wrote or reviewed by hand, and kept out of your source tree since they're regenerated fresh on every run rather than something to review or commit.
 
 Example GitHub Actions step:
 
@@ -159,6 +159,7 @@ Orbit doesn't generate or manage this file itself — `--ci` just gives any CI s
     environment_setup.md      # exact dev-environment startup steps, yours or self-discovered
   sessions/               # one JSON record per /test run
   traces/
+  orbit-ci/               # tests written by --ci runs, regenerated fresh each time
 ```
 
 `graphify-out/` (graph.json, GRAPH_REPORT.md, etc.) is written at your project root, not inside `.orbit/`, since that's where graphify's own incremental caching expects it to live — Orbit adds it to your `.gitignore` automatically.
@@ -174,8 +175,8 @@ Run `/memory` to read `overview.md`, `decisions.md`, and `failures.md` back in t
   "baseUrl": "http://localhost:3000",
   "devCommands": [],
   "testCommand": null,
-  "testDir": "Orbit_test/e2e",
-  "manualTestDir": "Orbit_test/user_input_test",
+  "testDir": "Orbit-test/e2e",
+  "manualTestDir": "Orbit-test/user_input_test",
   "writeMode": "ask",
   "maxRepairAttempts": 3,
   "dockerComposeFile": null,

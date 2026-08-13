@@ -22,7 +22,7 @@ export type OrbitConfig = {
 	// to execute unattended for these (see write_test_file/report_result's
 	// rules). Independent of testDir rather than derived from it, so it
 	// stays predictable even if testDir is customized to something not
-	// shaped like "Orbit_test/e2e".
+	// shaped like "Orbit-test/e2e".
 	manualTestDir: string;
 	writeMode: ApprovalMode;
 	maxRepairAttempts: number;

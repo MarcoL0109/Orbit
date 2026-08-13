@@ -55,13 +55,15 @@ const EXIT_PASSED = 0;
 const EXIT_FEATURE_FAILED = 1;
 const EXIT_COULD_NOT_RUN = 2;
 
-// CI-generated tests land in their own sibling folder under Orbit_test/,
-// not the project's configured (interactive) testDir — keeps a headless
-// pipeline run from mixing its output in with tests a human wrote/reviewed
-// interactively. Only overridden for the runTestingAgent call below;
-// everything else (the pre-test scan, manualTestDir) still uses the
-// project's real config as-is.
-const CI_TEST_DIR = 'Orbit_test/orbit-ci';
+// CI-generated tests land inside .orbit/, not the project's configured
+// (interactive) testDir — keeps a headless pipeline run from mixing its
+// output in with tests a human wrote/reviewed interactively, and keeps them
+// out of the source tree the regex/graphify scan walks (.orbit is already
+// in its ignore list) since they're regenerated fresh on every CI run
+// rather than being something to review as source. Only overridden for the
+// runTestingAgent call below; everything else (the pre-test scan,
+// manualTestDir) still uses the project's real config as-is.
+const CI_TEST_DIR = '.orbit/orbit-ci';
 
 // The headless counterpart to /test — same runTestingAgent call, same
 // session/manual-input file writes, but with every interactive prompt
