@@ -1,3 +1,4 @@
+import process from 'node:process';
 import {detectProjectRoot} from './projects/search.js';
 import {readOrbitConfig} from './init/config.js';
 import {isReachable} from './projects/reachability.js';
@@ -13,6 +14,7 @@ import {
 } from './ai/agent.js';
 import {writeAgentSession, writeManualInputTestRecords} from './ai/session.js';
 import {describeOrbitError} from './commands/error.js';
+import {cleanupTrackedProcesses} from './projects/processTracking.js';
 
 // Injectable so runCi's branching logic (the pre-flight checks below) can be
 // unit-tested against fake deps — real project/network/OpenAI calls, not
@@ -29,6 +31,12 @@ export type CiDeps = {
 	writeManualInputTestRecords: typeof writeManualInputTestRecords;
 	log: (message: string) => void;
 	logError: (message: string) => void;
+	// Only reached by the second-signal force-exit escalation below — kept
+	// injectable rather than calling process.exit directly (both to satisfy
+	// unicorn/no-process-exit, which reserves that call for the actual CLI
+	// entry point, and so a test can exercise the escalation path without
+	// really killing the test process).
+	exit: (code: number) => never;
 };
 
 const defaultDeps: CiDeps = {
@@ -46,14 +54,61 @@ const defaultDeps: CiDeps = {
 	logError(message) {
 		console.error(message);
 	},
+	exit(code) {
+		process.exit(code);
+	},
 };
 
-// Exit codes: 0 = ran, every feature passed. 1 = ran, at least one feature
-// failed/gave up (a real result). 2 = never got to run at all (bad
-// project, wrong approval mode, unreachable, unexpected exception).
+// Exit codes: 0 = ran, every feature passed. 1 = ran to completion, at
+// least one feature failed/gave up (a real result). 2 = never produced a
+// real result (bad project, wrong approval mode, unreachable, unexpected
+// exception, or the run was cancelled via SIGINT/SIGTERM before finishing).
 const EXIT_PASSED = 0;
 const EXIT_FEATURE_FAILED = 1;
 const EXIT_COULD_NOT_RUN = 2;
+
+// SIGINT/SIGTERM get one graceful chance to unwind: abort the run's
+// AbortController so an in-flight OpenAI call is cancelled (the SDK call
+// already receives this signal) and runTestingAgent's own `finally` block
+// gets to close the browser worker — rather than the process just vanishing
+// mid-flight (the previous behavior: a blunt top-level handler that called
+// process.exit(0) immediately) and leaving that child process orphaned.
+// This can't do anything about an in-flight tool call that doesn't itself
+// watch the signal (e.g. mid browser_action) — that step still has to
+// finish on its own before the loop's next per-iteration abort check is
+// reached — so a second signal escalates to an immediate forced exit,
+// matching the interactive CLI's existing behavior for the case where
+// graceful cleanup isn't resolving.
+function installCiSignalHandling(
+	controller: AbortController,
+	deps: CiDeps,
+): () => void {
+	let signalCount = 0;
+
+	function onSignal(signal: NodeJS.Signals): void {
+		signalCount += 1;
+
+		if (signalCount === 1) {
+			deps.logError(
+				`\nReceived ${signal} — stopping after the current step finishes. Press Ctrl-C again to force quit.`,
+			);
+			controller.abort();
+			return;
+		}
+
+		deps.logError(`\nReceived ${signal} again — forcing exit.`);
+		cleanupTrackedProcesses();
+		deps.exit(EXIT_COULD_NOT_RUN);
+	}
+
+	process.on('SIGINT', onSignal);
+	process.on('SIGTERM', onSignal);
+
+	return () => {
+		process.off('SIGINT', onSignal);
+		process.off('SIGTERM', onSignal);
+	};
+}
 
 // CI-generated tests land inside .orbit/, not the project's configured
 // (interactive) testDir — keeps a headless pipeline run from mixing its
@@ -76,7 +131,21 @@ export async function runCi(
 	overrides: Partial<CiDeps> = {},
 ): Promise<number> {
 	const deps: CiDeps = {...defaultDeps, ...overrides};
+	const controller = new AbortController();
+	const uninstallSignalHandling = installCiSignalHandling(controller, deps);
 
+	try {
+		return await runCiBody(prompt, deps, controller);
+	} finally {
+		uninstallSignalHandling();
+	}
+}
+
+async function runCiBody(
+	prompt: string,
+	deps: CiDeps,
+	controller: AbortController,
+): Promise<number> {
 	const detected = deps.detectProjectRoot();
 	if (!detected.isProject || !detected.root) {
 		deps.logError(describeOrbitError({kind: 'no-project-selected'}));
@@ -158,7 +227,6 @@ export async function runCi(
 		);
 	}
 
-	const controller = new AbortController();
 	const ciOrbitConfig = {...orbitConfig, testDir: CI_TEST_DIR};
 
 	let result;
@@ -197,6 +265,14 @@ export async function runCi(
 	deps.writeManualInputTestRecords(projectRoot, orbitConfig, result.results);
 
 	deps.log(formatAgentRunResult(result));
+
+	// A cancelled run (SIGINT/SIGTERM during runTestingAgent) reports its own
+	// status as 'aborted' rather than throwing — it's neither a pass nor a
+	// real pass/fail verdict on the feature, so it gets the same exit code as
+	// "never produced a real result" rather than being counted as a failure.
+	if (result.status === 'aborted') {
+		return EXIT_COULD_NOT_RUN;
+	}
 
 	return result.status === 'passed' ? EXIT_PASSED : EXIT_FEATURE_FAILED;
 }

@@ -1,8 +1,9 @@
+import process from 'node:process';
 import {
 	readGlobalProjects,
 	formatProjectsForTui,
 } from '../registry/knownProjects.js';
-import {getProjectDisplayName} from '../projects/search.js';
+import {getProjectDisplayName, detectProjectAtPath} from '../projects/search.js';
 import {
 	runTestingAgent,
 	formatAgentRunResult,
@@ -138,7 +139,7 @@ export const commands: OrbitCommand[] = [
 Available Orbit commands:
 /help       Show available commands
 /switch     Switch Orbit to work on a different project
-/init       Initialize Orbit for this project
+/init [path] Initialize Orbit — confirms the detected path first, or trusts an explicit one. Path is optional. If left empty, orbit will suggest one for you
 /deinit     Delete the .orbit folder within the current project
 /scan       Build index and context for the current project
 /config     View and change project configuration
@@ -156,27 +157,68 @@ Available Orbit commands:
 
 	{
 		name: 'init',
-		description: 'Create .orbit project context',
-		usage: '/init',
-		argsRule: {exact: 0},
-		async handler(_args, context) {
-			if (!context.project) {
-				reportError(context.setMessages, {kind: 'no-project-selected'});
+		description:
+			'Create .orbit project context. With no path, auto-detects and asks you to confirm (or edit) it first. An explicit path skips that confirmation and is trusted directly — bypassing auto-detection entirely — for cases (a polyglot monorepo, a nested frontend) where auto-detection picks the wrong root or none at all.',
+		usage: '/init [path]',
+		argsRule: {min: 0},
+		async handler(args, context) {
+			if (args.length > 1) {
+				reportError(context.setMessages, {
+					kind: 'invalid-arg-count',
+					usage: '/init [path]',
+					expected: '0 or 1',
+					given: args.length,
+				});
 				return;
 			}
 
-			if (context.project.hasOrbitFolder) {
+			const explicitPath = args[0];
+
+			if (explicitPath) {
+				const project = detectProjectAtPath(explicitPath);
+
+				if (!project.isProject || !project.root) {
+					reportError(context.setMessages, {
+						kind: 'invalid-project-path',
+						path: explicitPath,
+					});
+					return;
+				}
+
+				if (project.hasOrbitFolder) {
+					reportError(context.setMessages, {
+						kind: 'project-already-initialized',
+					});
+					return;
+				}
+
+				context.setProject(project);
+				context.setMessages(previous => [
+					...previous,
+					{role: 'system', content: `Initializing at: ${project.root}`},
+				]);
+				context.setConfirmName(getProjectDisplayName(project.root));
+				context.setCheckName(true);
+				return;
+			}
+
+			// No path given. If boot-time auto-detection already found an
+			// initialized project here, keep the fast, no-typing error rather
+			// than asking the user to confirm a path we already know is a
+			// no-op — that confirmation step exists for the uncertain case,
+			// not this one.
+			if (context.project?.isProject && context.project.hasOrbitFolder) {
 				reportError(context.setMessages, {kind: 'project-already-initialized'});
 				return;
 			}
 
-			let projectName = 'Default';
-			if (context.project.root) {
-				projectName = getProjectDisplayName(context.project.root);
-			}
-
-			context.setConfirmName(projectName);
-			context.setCheckName(true);
+			// Otherwise offer the best guess available — the auto-detected
+			// root if detection succeeded, or plain cwd if it didn't — for the
+			// user to confirm or edit, rather than failing outright the way a
+			// missing/low-confidence auto-detection used to.
+			const suggestedPath = context.project?.root ?? process.cwd();
+			context.setConfirmInitPath(suggestedPath);
+			context.setCheckInitPath(true);
 		},
 	},
 

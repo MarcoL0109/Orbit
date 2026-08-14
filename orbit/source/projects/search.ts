@@ -146,6 +146,44 @@ export function detectProjectRoot(
 	};
 }
 
+// An explicit path from the user (e.g. `/init <path>`) is trusted directly
+// as the project root — unlike detectProjectRoot, this never walks up to a
+// parent directory and never rejects the directory for scoring under the
+// confidence threshold. That threshold exists to avoid false positives when
+// *guessing* a root from an arbitrary cwd; it has no purpose once the user
+// has named the directory themselves. This is the intended way to point
+// Orbit at a directory its own heuristic can't reach (e.g. a Node frontend
+// nested inside a polyglot monorepo whose actual root has no JS-specific
+// marker at all).
+export function detectProjectAtPath(
+	explicitPath: string,
+): ProjectDetectionResult {
+	const resolved = path.resolve(explicitPath);
+
+	if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+		return {
+			isProject: false,
+			root: null,
+			confidence: 0,
+			markers: [],
+			hasOrbitFolder: false,
+		};
+	}
+
+	const markers = getMarkers(resolved);
+
+	return {
+		isProject: true,
+		root: resolved,
+		confidence: scoreMarkers(markers),
+		markers,
+		packageManager: detectPackageManager(markers),
+		framework: detectFramework(markers),
+		testFramework: detectTestFramework(markers),
+		hasOrbitFolder: markers.includes('.orbit'),
+	};
+}
+
 export function getProjectDisplayName(projectRoot: string) {
 	const packageJsonPath = path.join(projectRoot, 'package.json');
 

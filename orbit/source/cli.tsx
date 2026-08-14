@@ -8,15 +8,21 @@ import {cleanupTrackedProcesses} from './projects/processTracking.js';
 import {runCi} from './ci.js';
 import 'dotenv/config.js';
 
-// Safety net for abrupt termination (Ctrl-C, a parent process killing this
-// one) — /exit's own handler covers the graceful path, but a dev server
-// run_command started shouldn't be left orphaned just because the CLI
-// itself didn't shut down cleanly.
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-	process.on(signal, () => {
-		cleanupTrackedProcesses();
-		process.exit(0);
-	});
+// Safety net for abrupt termination in the interactive UI (Ctrl-C, a parent
+// process killing this one) — /exit's own handler covers the graceful path,
+// but a dev server run_command started shouldn't be left orphaned just
+// because the CLI itself didn't shut down cleanly. Only installed for the
+// interactive paths below (not --ci) — runCi installs its own signal
+// handling instead, so a cancelled CI run gets a chance to abort in flight
+// and let its browser worker close, rather than being killed out from under
+// it here before that can happen.
+function installInteractiveSignalHandling(): void {
+	for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+		process.on(signal, () => {
+			cleanupTrackedProcesses();
+			process.exit(0);
+		});
+	}
 }
 
 const program = new Command();
@@ -61,6 +67,7 @@ program
 			process.exit(exitCode);
 		}
 
+		installInteractiveSignalHandling();
 		render(<App initialPrompt={prompt || undefined} />);
 	});
 
@@ -68,6 +75,7 @@ program
 	.command('scan')
 	.description('Scan the current project')
 	.action(() => {
+		installInteractiveSignalHandling();
 		render(<App initialPrompt="Scan this project" />);
 	});
 
@@ -75,6 +83,7 @@ program
 	.command('init')
 	.description('Create Orbit config in the current project')
 	.action(() => {
+		installInteractiveSignalHandling();
 		render(<App initialPrompt="Initialize Orbit config" />);
 	});
 

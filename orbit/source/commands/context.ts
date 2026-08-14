@@ -36,6 +36,12 @@ export type CommandContext = {
 	setProject: React.Dispatch<React.SetStateAction<ProjectInfo | null>>;
 	setCheckName: React.Dispatch<React.SetStateAction<boolean>>;
 	setConfirmName: React.Dispatch<React.SetStateAction<string>>;
+	// The /init path-confirmation step: shown when /init is run with no
+	// explicit path argument, pre-filled with an auto-detected (or cwd)
+	// suggestion the user can accept as-is or edit before it's resolved via
+	// detectProjectAtPath.
+	setCheckInitPath: React.Dispatch<React.SetStateAction<boolean>>;
+	setConfirmInitPath: React.Dispatch<React.SetStateAction<string>>;
 	startAbortableTask: () => AbortController;
 	clearAbortableTask: () => void;
 	abortCurrentTask: () => boolean;

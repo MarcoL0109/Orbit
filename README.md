@@ -70,7 +70,7 @@ Shows which routes and components still have no test at all.
 
 | Command | What it does |
 |---|---|
-| `/init` | Create `.orbit/` context for the current project and run an initial scan |
+| `/init [path]` | Create `.orbit/` context and run an initial scan — confirms the detected path first, or trusts an explicit one directly |
 | `/test <description>` | Generate and run a Playwright test for the feature you describe |
 | `/scan` | Refresh the project index (routes, components, tests, config) |
 | `/coverage` | List routes/components with no matching test |
@@ -83,6 +83,8 @@ Shows which routes and components still have no test at all.
 | `/clear` | Clear the terminal screen |
 | `/help` | List available commands |
 | `/exit` | Exit Orbit, cleaning up any process it started itself |
+
+`/init`'s project-root auto-detection scores a directory by the config files it finds (`package.json`, `next.config.*`, `.git`, ...) and requires a minimum confidence before trusting it — which a polyglot monorepo can fail even when the actual app lives right there, if its root has no JS-specific marker (a Python backend alongside a `frontend/` folder, for example). A bare `/init` (no path) shows you what it detected — or plain `cwd` if it couldn't detect anything — and asks you to confirm it; press Enter to accept it, or edit it first to redirect Orbit somewhere else (like `frontend`) before confirming. `/init <path>` given directly skips that confirmation and trusts the path outright, bypassing the scoring entirely — useful once you already know where Orbit should init.
 
 ## How `/test` actually works
 

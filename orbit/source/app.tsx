@@ -3,7 +3,11 @@ import {Box, Text, useInput} from 'ink';
 import TextInput from 'ink-text-input';
 import Spinner from 'ink-spinner';
 import SelectInput from 'ink-select-input';
-import {detectProjectRoot} from './projects/search.js';
+import {
+	detectProjectRoot,
+	detectProjectAtPath,
+	getProjectDisplayName,
+} from './projects/search.js';
 import {validateProjectPath} from './projects/path.js';
 import {rememberProject, readGlobalProjects} from './registry/knownProjects.js';
 import {initOrbitProject} from './init/init.js';
@@ -45,6 +49,8 @@ export function App({initialPrompt}: AppProps) {
 	const [checkName, setCheckName] = useState<boolean>(false);
 	const [confirmDeinit, setConfirmDeinit] = useState<boolean>(false);
 	const [confirmName, setConfirmName] = useState<string>('');
+	const [checkInitPath, setCheckInitPath] = useState<boolean>(false);
+	const [confirmInitPath, setConfirmInitPath] = useState<string>('');
 	const [pendingApproval, setPendingApproval] = useState<{
 		description: string;
 		resolve: (approved: boolean) => void;
@@ -365,6 +371,8 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 			setProject,
 			setCheckName,
 			setConfirmName,
+			setCheckInitPath,
+			setConfirmInitPath,
 			startAbortableTask,
 			clearAbortableTask,
 			abortCurrentTask,
@@ -425,30 +433,59 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 				},
 			]);
 		} else {
-			const checkProject = detectProjectRoot(res.path);
-			if (checkProject.isProject) {
-				setProject(checkProject);
-				setMessages(previous => [
-					...previous,
-					{
-						role: 'system',
-						content: `Switched to project: ${checkProject.root}`,
-					},
-				]);
-			} else {
-				setMessages(previous => [
-					...previous,
-					{
-						role: 'system',
-						content: `Please ensure the path direct Orbit to a project`,
-					},
-				]);
-			}
+			// Trusted directly, same as /init <path> — the user just typed this
+			// exact directory in, so there's no reason to run it back through
+			// detectProjectRoot's confidence threshold (that exists for
+			// *guessing* a root from an arbitrary cwd, not for a path someone
+			// named themselves). validateProjectPath above already confirmed
+			// it exists and is a directory, so detectProjectAtPath is
+			// guaranteed isProject here.
+			const checkProject = detectProjectAtPath(res.path);
+			setProject(checkProject);
+			setMessages(previous => [
+				...previous,
+				{
+					role: 'system',
+					content: `Switched to project: ${checkProject.root}`,
+				},
+			]);
 		}
 
 		setSelectProjectMode(false);
 		setInputPath('');
 		setSelectedProjectOption('');
+	};
+
+	const handleConfirmInitPath = () => {
+		// Unmount this TextInput before anything else, same reasoning as
+		// handleConfirmNameInit below — it must not still be listening once
+		// the name-confirmation TextInput mounts right after it.
+		setCheckInitPath(false);
+		const submittedPath = confirmInitPath;
+		setConfirmInitPath('');
+
+		// The user has now explicitly approved this exact path (whether by
+		// editing it or accepting the suggestion as-is), so — same as
+		// /init <path> — detectProjectAtPath trusts it directly rather than
+		// re-running it through detectProjectRoot's confidence threshold.
+		const detected = detectProjectAtPath(submittedPath);
+
+		if (!detected.isProject || !detected.root) {
+			reportError(setMessages, {
+				kind: 'invalid-project-path',
+				path: submittedPath,
+			});
+			return;
+		}
+
+		if (detected.hasOrbitFolder) {
+			reportError(setMessages, {kind: 'project-already-initialized'});
+			return;
+		}
+
+		setProject(detected);
+		setConfirmName(getProjectDisplayName(detected.root));
+		setCheckName(true);
 	};
 
 	const handleConfirmNameInit = async () => {
@@ -699,6 +736,7 @@ Global memory updated:
 			selectProjectMode ||
 			confirmDeinit ||
 			checkName ||
+			checkInitPath ||
 			isInitting ||
 			pendingApproval ||
 			pendingScanMode ||
@@ -737,6 +775,21 @@ Global memory updated:
 						placeholder="Type Project Path (FROM HOME)"
 						onChange={setInputPath}
 						onSubmit={handleProjectPath}
+					/>
+				</Box>
+			)}
+
+			{checkInitPath && (
+				<Box marginTop={1} flexDirection="column">
+					<Text>
+						Detected project path shown below. Press Enter to use it, or edit it
+						first.
+					</Text>
+					<TextInput
+						value={confirmInitPath}
+						placeholder="Project path"
+						onChange={setConfirmInitPath}
+						onSubmit={handleConfirmInitPath}
 					/>
 				</Box>
 			)}

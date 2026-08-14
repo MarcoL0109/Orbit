@@ -10,6 +10,7 @@ export type OrbitError =
 	| {kind: 'task-in-progress'}
 	| {kind: 'unknown-command'; commandName: string}
 	| {kind: 'no-project-selected'}
+	| {kind: 'invalid-project-path'; path: string}
 	| {kind: 'project-already-initialized'}
 	| {kind: 'project-not-initialized'}
 	| {kind: 'post-init-scan-failed'; cause: unknown}
@@ -51,6 +52,10 @@ Type /help to see available commands.`;
 
 		case 'no-project-selected': {
 			return 'No valid project selected. Please select or open a project first.';
+		}
+
+		case 'invalid-project-path': {
+			return `${error.path} does not exist or is not a directory.`;
 		}
 
 		case 'project-already-initialized': {
