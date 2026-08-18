@@ -582,3 +582,65 @@ export function formatAgentRunResult(result: AgentRunResult): string {
 
 ${featureBlocks.join('\n\n')}`;
 }
+
+export type AgentRunResultJson = {
+	status: AgentRunResult['status'];
+	summary: string;
+	features: Array<{
+		feature: string;
+		file: string | null;
+		status: FeatureResult['status'];
+		summary: string;
+		requiresManualInput: boolean;
+		manualStepOutcome: 'succeeded' | 'failed' | null;
+		// Null when the feature has no correlated run_test call at all — a
+		// manual-input feature with no test file, or a whole-suite run_test
+		// call that collectRunResultsByFile can't attribute to one feature.
+		tests: {
+			totalTests: number;
+			passedCount: number;
+			failedCount: number;
+			durationMs: number;
+			attempts: number;
+			tests: TestOutcome[];
+			failures: TestFailureDetail[];
+		} | null;
+	}>;
+};
+
+// The machine-readable counterpart to formatAgentRunResult — same
+// feature/test-result correlation via collectRunResultsByFile, just shaped
+// for a CI system to parse (--ci --json) instead of a human to read.
+export function agentRunResultToJson(
+	result: AgentRunResult,
+): AgentRunResultJson {
+	const runResultsByFile = collectRunResultsByFile(result.steps);
+
+	return {
+		status: result.status,
+		summary: result.summary,
+		features: result.results.map(feature => {
+			const run = feature.file ? runResultsByFile.get(feature.file) : undefined;
+
+			return {
+				feature: feature.feature,
+				file: feature.file,
+				status: feature.status,
+				summary: feature.summary,
+				requiresManualInput: feature.requiresManualInput,
+				manualStepOutcome: feature.manualStepOutcome,
+				tests: run
+					? {
+							totalTests: run.result.totalTests,
+							passedCount: run.result.passedCount,
+							failedCount: run.result.failedCount,
+							durationMs: run.result.durationMs,
+							attempts: run.attempts,
+							tests: run.result.tests,
+							failures: run.result.failures,
+					  }
+					: null,
+			};
+		}),
+	};
+}

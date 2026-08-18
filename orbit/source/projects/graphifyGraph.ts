@@ -65,12 +65,58 @@ export function loadGraphifyGraph(projectRoot: string): GraphifyGraph | null {
 	}
 }
 
-// Exact label/norm_label match first; then the same but ignoring a
-// trailing "()" (the model can reasonably type "runTestingAgent" without
-// knowing a function node's real label carries the parens); then a loose
-// substring match as a last resort. Returns every match at whichever tier
-// first produces one — explain_symbol decides what to do with 0, 1, or
-// several results, this just ranks candidates.
+// A source-file extension is a stronger, still framework-agnostic signal
+// than merely "doesn't end in ()" — a file's own constants (SUGGESTIONS,
+// STATE_TONE, ...) don't look like a callable either, but they don't look
+// like a path at all, whereas the file's own module-level node's label
+// always does (it's graphify's prefix-stripped form of the real path).
+// Not exhaustive, but broad enough across the languages graphify actually
+// parses to be a reliable disambiguator rather than a guess.
+const FILE_LABEL_EXTENSION =
+	/\.(tsx?|jsx?|mjs|cjs|py|rb|go|java|kt|swift|vue|svelte|c|cc|cpp|h|hpp|cs|php|rs)$/i;
+
+// A path-based match (below) naming a whole file — its most common form, a
+// route or component path taken straight from the project map — matches
+// every node graphify extracted from that file, not just one: the file's
+// own module-level node plus one per function/class/constant inside it.
+// When they all share a single source_file, the model almost always meant
+// the file itself, not one of its members — narrow to whichever of those
+// nodes has a file-extension-shaped label, which is exactly how graphify's
+// own file-level nodes come out. Left alone (every candidate returned) if
+// that doesn't resolve to exactly one node, or if the matches actually
+// span more than one file — a genuinely ambiguous query, e.g. a bare
+// "page.tsx" that exists under several routes, still needs the caller to
+// disambiguate.
+function preferFileLevelNode(nodes: GraphifyNode[]): GraphifyNode[] {
+	if (nodes.length <= 1) return nodes;
+
+	const distinctFiles = new Set(nodes.map(node => node.source_file));
+	if (distinctFiles.size > 1) return nodes;
+
+	const fileShaped = nodes.filter(node =>
+		FILE_LABEL_EXTENSION.test(node.label),
+	);
+	return fileShaped.length === 1 ? fileShaped : nodes;
+}
+
+// Exact label/norm_label match first; then an exact match against the
+// node's real file path (source_file) — separate from label, and worth
+// trying before any fuzzy label matching, because graphify's own label
+// generation strips a leading path segment inconsistently (observed: it
+// drops a Next.js "app/" router prefix from most page files' labels, but
+// keeps it for the root "app/page.tsx"). The model routinely knows and
+// passes the real path (e.g. from a route list) rather than graphify's
+// internal label, and that path is project-layout-agnostic — this isn't
+// "strip app/" hardcoded for one framework, it's matching against a field
+// every graphify project already records regardless of its own
+// conventions. Then the same label tier again but ignoring a trailing "()"
+// (the model can reasonably type "runTestingAgent" without knowing a
+// function node's real label carries the parens); then a path suffix match
+// (so "contacts/page.tsx" still finds a node whose source_file is
+// "app/contacts/page.tsx", without needing to guess the exact prefix); then
+// a loose label substring match as a last resort. Returns every match at
+// whichever tier first produces one — explain_symbol decides what to do
+// with 0, 1, or several results, this just ranks candidates.
 export function findGraphNodes(
 	graph: GraphifyGraph,
 	query: string,
@@ -83,11 +129,25 @@ export function findGraphNodes(
 	);
 	if (exact.length > 0) return exact;
 
+	const exactPath = graph.nodes.filter(
+		node => node.source_file.toLowerCase() === normalizedQuery,
+	);
+	if (exactPath.length > 0) return preferFileLevelNode(exactPath);
+
 	const strippedQuery = normalizedQuery.replace(/\(\)$/, '');
 	const looseExact = graph.nodes.filter(
 		node => node.norm_label.replace(/\(\)$/, '') === strippedQuery,
 	);
 	if (looseExact.length > 0) return looseExact;
+
+	const pathSuffix = graph.nodes.filter(node => {
+		const sourceFile = node.source_file.toLowerCase();
+		return (
+			sourceFile.endsWith(`/${normalizedQuery}`) ||
+			sourceFile.endsWith(`\\${normalizedQuery}`)
+		);
+	});
+	if (pathSuffix.length > 0) return preferFileLevelNode(pathSuffix);
 
 	return graph.nodes.filter(node => node.norm_label.includes(normalizedQuery));
 }

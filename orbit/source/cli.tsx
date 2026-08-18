@@ -38,38 +38,51 @@ program
 		'--ci',
 		'Run headlessly for CI: execute once, print the result, exit with a pass/fail status code — no interactive UI',
 	)
-	.action(async (promptParts: string[], options: {ci?: boolean}) => {
-		const prompt = promptParts.join(' ').trim();
+	.option(
+		'--json',
+		'With --ci, print a single JSON result object to stdout instead of human-readable text — all other output moves to stderr',
+	)
+	.action(
+		async (promptParts: string[], options: {ci?: boolean; json?: boolean}) => {
+			const prompt = promptParts.join(' ').trim();
 
-		if (options.ci) {
-			if (!prompt) {
+			if (options.json && !options.ci) {
 				console.error(
-					'orbit --ci requires a feature description, e.g. orbit "user can sign up" --ci',
+					'--json only applies to --ci — pass both: orbit "..." --ci --json',
 				);
 				process.exit(2);
 			}
 
-			// A quoted description arrives as a single shell word — commander
-			// only ever sees more than one promptParts entry when the shell
-			// split it apart, which happens exactly when it wasn't quoted.
-			// This can't be detected after the fact for a genuinely
-			// single-word description (quoted or not, it looks identical by
-			// the time Node sees it) — nothing to enforce there anyway, since
-			// there's no space for the shell to have split on.
-			if (promptParts.length > 1) {
-				console.error(
-					`orbit --ci requires the feature description to be a single quoted argument — it arrived as ${promptParts.length} separate words instead, which means it wasn't quoted. Wrap it in quotes:\n  orbit "${prompt}" --ci`,
-				);
-				process.exit(2);
+			if (options.ci) {
+				if (!prompt) {
+					console.error(
+						'orbit --ci requires a feature description, e.g. orbit "user can sign up" --ci',
+					);
+					process.exit(2);
+				}
+
+				// A quoted description arrives as a single shell word — commander
+				// only ever sees more than one promptParts entry when the shell
+				// split it apart, which happens exactly when it wasn't quoted.
+				// This can't be detected after the fact for a genuinely
+				// single-word description (quoted or not, it looks identical by
+				// the time Node sees it) — nothing to enforce there anyway, since
+				// there's no space for the shell to have split on.
+				if (promptParts.length > 1) {
+					console.error(
+						`orbit --ci requires the feature description to be a single quoted argument — it arrived as ${promptParts.length} separate words instead, which means it wasn't quoted. Wrap it in quotes:\n  orbit "${prompt}" --ci`,
+					);
+					process.exit(2);
+				}
+
+				const exitCode = await runCi(prompt, {}, {json: options.json});
+				process.exit(exitCode);
 			}
 
-			const exitCode = await runCi(prompt);
-			process.exit(exitCode);
-		}
-
-		installInteractiveSignalHandling();
-		render(<App initialPrompt={prompt || undefined} />);
-	});
+			installInteractiveSignalHandling();
+			render(<App initialPrompt={prompt || undefined} />);
+		},
+	);
 
 program
 	.command('scan')

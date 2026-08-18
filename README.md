@@ -123,7 +123,42 @@ Either way, the regular scan still runs — graphify mode adds to it, it never r
 orbit "user can sign up" --ci
 ```
 
-Runs the exact same testing agent headlessly — no interactive UI, no prompts — and exits with a status code a pipeline can gate on: `0` if every feature passed, `1` if the agent ran but a feature failed, `2` if it couldn't run at all (bad project, misconfigured, unreachable). The description must be a single quoted argument — an unquoted multi-word description arrives as separate words with no way to tell it apart from several arguments, so `--ci` rejects it with a corrected example rather than guessing.
+Runs the exact same testing agent headlessly — no interactive UI, no prompts — and exits with a status code a pipeline can gate on: `0` if every feature passed, `1` if the agent ran but a feature failed, `2` if it couldn't run at all (bad project, misconfigured, unreachable, or the run was cancelled). The description must be a single quoted argument — an unquoted multi-word description arrives as separate words with no way to tell it apart from several arguments, so `--ci` rejects it with a corrected example rather than guessing.
+
+Add `--json` for a machine-parseable result instead of human-readable text:
+
+```bash
+orbit "user can sign up" --ci --json
+```
+
+```json
+{
+  "status": "passed",
+  "summary": "Test passed: 1/1 feature(s) passed",
+  "features": [
+    {
+      "feature": "auth.signup",
+      "file": "auth.signup.spec.ts",
+      "status": "passed",
+      "summary": "New user can sign up and reaches the dashboard.",
+      "requiresManualInput": false,
+      "manualStepOutcome": null,
+      "tests": {
+        "totalTests": 1,
+        "passedCount": 1,
+        "failedCount": 0,
+        "durationMs": 6421,
+        "attempts": 1,
+        "tests": [{ "title": "user can sign up", "status": "passed", "durationMs": 6421 }],
+        "failures": []
+      }
+    }
+  ],
+  "exitCode": 0
+}
+```
+
+Exactly one JSON object is written to stdout — the process's normal exit code still applies, but `exitCode` is repeated inside the object too so a consumer parsing captured stdout doesn't also need to separately track how the process exited. Everything else that would normally print (per-step progress, the graphify outcome, an auto-resolved-uncertain-outcome note, the human-readable summary) moves to stderr instead, so stdout is safe to pipe straight into `JSON.parse`. A pre-flight failure (bad project, wrong approval mode, unreachable) still produces one JSON object, shaped as `{"status": "error", "error": "...", "exitCode": 2}`, rather than leaving stdout empty. `--json` without `--ci` is rejected — it only means anything paired with a headless run.
 
 Three things CI mode deliberately does *not* do, unlike interactive `/test`:
 

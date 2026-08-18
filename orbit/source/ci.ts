@@ -10,7 +10,10 @@ import {writeProjectMap} from './projects/scan.js';
 import {
 	runTestingAgent,
 	formatAgentRunResult,
+	agentRunResultToJson,
 	describeAgentActivity,
+	type AgentRunResult,
+	type AgentRunResultJson,
 } from './ai/agent.js';
 import {writeAgentSession, writeManualInputTestRecords} from './ai/session.js';
 import {describeOrbitError} from './commands/error.js';
@@ -120,57 +123,118 @@ function installCiSignalHandling(
 // manualTestDir) still uses the project's real config as-is.
 const CI_TEST_DIR = '.orbit/orbit-ci';
 
+// Emitted to real stdout as a single JSON.stringify'd line when --json is
+// requested — either the full run result (features + per-test detail,
+// reusing agentRunResultToJson) or, when the run never got that far, a
+// minimal error shape. Always carries exitCode so a consumer parsing this
+// doesn't also need to separately track the process's actual exit code.
+type CiJsonOutput =
+	| (AgentRunResultJson & {exitCode: number})
+	| {status: 'error'; error: string; exitCode: number};
+
+// What runCiBody actually produced, before runCi decides how to render it.
+// `result` is set on every path that reached a real (possibly aborted)
+// AgentRunResult; `error` is set on every earlier pre-flight/exception exit
+// — always exactly one of the two, never both.
+type CiOutcome = {
+	exitCode: number;
+	result?: AgentRunResult;
+	error?: string;
+};
+
 // The headless counterpart to /test — same runTestingAgent call, same
 // session/manual-input file writes, but with every interactive prompt
 // (requestApproval, requestInput, requestOutcomeConfirmation,
 // requestScanMode) replaced by a fixed, non-interactive answer instead of
 // waiting on a human. See the plan this was built from for why each of
 // these specific defaults was chosen over the alternatives.
+//
+// `json`, when true, changes only how the result is reported: every
+// ordinary progress/log line that would normally go to stdout is
+// redirected to deps.logError's stream instead (by aliasing the deps.log
+// passed into runCiBody), and a single JSON.stringify'd CiJsonOutput line
+// is written to real stdout at the very end — so a consumer piping stdout
+// gets exactly one parseable line, never a mix of narrative text and data.
 export async function runCi(
 	prompt: string,
 	overrides: Partial<CiDeps> = {},
+	options: {json?: boolean} = {},
 ): Promise<number> {
 	const deps: CiDeps = {...defaultDeps, ...overrides};
+	const json = options.json ?? false;
+	const effectiveDeps: CiDeps = json ? {...deps, log: deps.logError} : deps;
+
 	const controller = new AbortController();
-	const uninstallSignalHandling = installCiSignalHandling(controller, deps);
+	const uninstallSignalHandling = installCiSignalHandling(
+		controller,
+		effectiveDeps,
+	);
 
 	try {
-		return await runCiBody(prompt, deps, controller);
+		const outcome = await runCiBody(prompt, effectiveDeps, controller);
+
+		if (json) {
+			const payload: CiJsonOutput = outcome.result
+				? {...agentRunResultToJson(outcome.result), exitCode: outcome.exitCode}
+				: {
+						status: 'error',
+						error: outcome.error ?? 'Unknown error',
+						exitCode: outcome.exitCode,
+				  };
+			// Deps.log, not effectiveDeps.log — the one write in this whole run
+			// that must land on real stdout regardless of json mode.
+			deps.log(JSON.stringify(payload));
+		}
+
+		return outcome.exitCode;
 	} finally {
 		uninstallSignalHandling();
 	}
+}
+
+// Every early exit shares the same shape: log the human-readable message
+// (always to stderr, json mode or not) and carry that same message as the
+// `error` field of the eventual JSON output.
+function fail(deps: CiDeps, exitCode: number, message: string): CiOutcome {
+	deps.logError(message);
+	return {exitCode, error: message};
 }
 
 async function runCiBody(
 	prompt: string,
 	deps: CiDeps,
 	controller: AbortController,
-): Promise<number> {
+): Promise<CiOutcome> {
 	const detected = deps.detectProjectRoot();
 	if (!detected.isProject || !detected.root) {
-		deps.logError(describeOrbitError({kind: 'no-project-selected'}));
-		return EXIT_COULD_NOT_RUN;
+		return fail(
+			deps,
+			EXIT_COULD_NOT_RUN,
+			describeOrbitError({kind: 'no-project-selected'}),
+		);
 	}
 
 	const projectRoot = detected.root;
 
 	if (!detected.hasOrbitFolder) {
-		deps.logError(
+		return fail(
+			deps,
+			EXIT_COULD_NOT_RUN,
 			`${describeOrbitError({
 				kind: 'project-not-initialized',
 			})} CI mode does not auto-init — run /init interactively first.`,
 		);
-		return EXIT_COULD_NOT_RUN;
 	}
 
 	const orbitConfig = deps.readOrbitConfig(projectRoot);
 	if (!orbitConfig) {
-		deps.logError(
+		return fail(
+			deps,
+			EXIT_COULD_NOT_RUN,
 			`${describeOrbitError({
 				kind: 'project-not-initialized',
 			})} .orbit/config.json exists but couldn't be read.`,
 		);
-		return EXIT_COULD_NOT_RUN;
 	}
 
 	if (
@@ -181,21 +245,23 @@ async function runCiBody(
 			orbitConfig.approvalMode !== 'always' && 'approvalMode',
 			orbitConfig.writeMode !== 'always' && 'writeMode',
 		].filter(Boolean);
-		deps.logError(
+		return fail(
+			deps,
+			EXIT_COULD_NOT_RUN,
 			`CI mode requires approvalMode and writeMode to both be "always" — currently ${wrongFields.join(
 				' and ',
 			)} still "ask". There's no human to answer an approval prompt in CI. Run /config interactively to change ${
 				wrongFields.length > 1 ? 'them' : 'it'
 			} first.`,
 		);
-		return EXIT_COULD_NOT_RUN;
 	}
 
 	if (!(await deps.isReachable(orbitConfig.baseUrl))) {
-		deps.logError(
+		return fail(
+			deps,
+			EXIT_COULD_NOT_RUN,
 			`${orbitConfig.baseUrl} is not reachable. CI mode does not attempt to auto-start the dev environment (unlike /test interactively) — bring it up in an earlier pipeline step first.`,
 		);
-		return EXIT_COULD_NOT_RUN;
 	}
 
 	try {
@@ -253,12 +319,13 @@ async function runCiBody(
 			},
 		);
 	} catch (error) {
-		deps.logError(
+		return fail(
+			deps,
+			EXIT_COULD_NOT_RUN,
 			`Test agent run failed: ${
 				error instanceof Error ? error.message : String(error)
 			}`,
 		);
-		return EXIT_COULD_NOT_RUN;
 	}
 
 	deps.writeAgentSession(projectRoot, prompt, result);
@@ -270,9 +337,12 @@ async function runCiBody(
 	// status as 'aborted' rather than throwing — it's neither a pass nor a
 	// real pass/fail verdict on the feature, so it gets the same exit code as
 	// "never produced a real result" rather than being counted as a failure.
-	if (result.status === 'aborted') {
-		return EXIT_COULD_NOT_RUN;
-	}
+	const exitCode =
+		result.status === 'aborted'
+			? EXIT_COULD_NOT_RUN
+			: result.status === 'passed'
+			? EXIT_PASSED
+			: EXIT_FEATURE_FAILED;
 
-	return result.status === 'passed' ? EXIT_PASSED : EXIT_FEATURE_FAILED;
+	return {exitCode, result};
 }

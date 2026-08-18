@@ -198,3 +198,67 @@ test.serial(
 		t.is(process.listenerCount('SIGTERM'), sigtermBefore);
 	},
 );
+
+test.serial(
+	'--json mode: stdout gets exactly one JSON line, progress goes to stderr instead',
+	async t => {
+		const stdoutLines: string[] = [];
+		const stderrLines: string[] = [];
+
+		const exitCode = await runCi(
+			'a feature',
+			{
+				...preflightOkDeps(),
+				log(message) {
+					stdoutLines.push(message);
+				},
+				logError(message) {
+					stderrLines.push(message);
+				},
+				async runTestingAgent(_prompt, _context, {onProgress} = {}) {
+					onProgress?.({name: 'browser_action'});
+					return agentResult('passed');
+				},
+			},
+			{json: true},
+		);
+
+		t.is(exitCode, 0);
+		t.is(stdoutLines.length, 1);
+		const payload = JSON.parse(stdoutLines[0]!) as Record<string, unknown>;
+		t.is(payload['status'], 'passed');
+		t.is(payload['exitCode'], 0);
+		t.deepEqual(payload['features'], []);
+
+		// The progress line and formatAgentRunResult's own text both went
+		// through the aliased log — i.e. to stderr — not stdout.
+		t.true(stderrLines.length > 0);
+	},
+);
+
+test.serial(
+	'--json mode: a pre-flight failure still emits one JSON line, shaped as an error',
+	async t => {
+		const stdoutLines: string[] = [];
+
+		const exitCode = await runCi(
+			'a feature',
+			{
+				...preflightOkDeps(),
+				log(message) {
+					stdoutLines.push(message);
+				},
+				logError() {},
+				isReachable: async () => false,
+			},
+			{json: true},
+		);
+
+		t.is(exitCode, 2);
+		t.is(stdoutLines.length, 1);
+		const payload = JSON.parse(stdoutLines[0]!) as Record<string, unknown>;
+		t.is(payload['status'], 'error');
+		t.is(payload['exitCode'], 2);
+		t.true(typeof payload['error'] === 'string');
+	},
+);
