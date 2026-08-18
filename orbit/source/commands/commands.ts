@@ -22,6 +22,7 @@ import {
 	readProjectMemory,
 	readEnvironmentSetupInstructions,
 	writeEnvironmentSetupInstructions,
+	invalidateEnvironmentSetupInstructions,
 } from '../init/memory.js';
 import {writeProjectMap, formatScanResult} from '../projects/scan.js';
 import {
@@ -122,6 +123,24 @@ function formatConfigFieldValue(
 	if (Array.isArray(value))
 		return value.length > 0 ? value.join(', ') : '(none)';
 	return String(value);
+}
+
+// Shared by both environment-setup failure branches below: a saved recipe
+// that just failed to bring the app up is more likely wrong than the
+// project itself being broken, so it's cleared rather than left to repeat
+// the same failure on every future run.
+function invalidateStaleSetupInstructions(
+	projectRoot: string,
+	setMessages: CommandContext['setMessages'],
+	hadDocumentedInstructions: boolean,
+	reason: string,
+): void {
+	if (!hadDocumentedInstructions) return;
+	invalidateEnvironmentSetupInstructions(projectRoot);
+	setMessages(previous => [
+		...previous,
+		{role: 'agent', content: reason, color: 'gray'},
+	]);
 }
 
 function formatConfigSummary(config: OrbitConfig): string {
@@ -419,6 +438,17 @@ Available Orbit commands:
 						}
 
 						if (setupResult.status === 'gave_up') {
+							// The agent got stuck trying to follow a recipe it
+							// was told to trust — that recipe is probably why
+							// it's stuck, so clear it rather than handing the
+							// next run the same dead end.
+							invalidateStaleSetupInstructions(
+								context.project.root,
+								context.setMessages,
+								hadDocumentedInstructions,
+								'The saved setup steps in .orbit/memory/environment_setup.md failed, so they were cleared — the next run will rediscover them from scratch.',
+							);
+
 							reportError(context.setMessages, {
 								kind: 'environment-setup-gave-up',
 								notes: setupResult.notes,
@@ -437,6 +467,18 @@ Available Orbit commands:
 						);
 						const nowReachable = await waitUntilReachable(orbitConfig.baseUrl);
 						if (!nowReachable) {
+							// The agent followed the documented recipe and
+							// believed it worked, but the app never actually
+							// came up — the recipe itself is the likely
+							// culprit, so clear it rather than repeating the
+							// same failure on every future run.
+							invalidateStaleSetupInstructions(
+								context.project.root,
+								context.setMessages,
+								hadDocumentedInstructions,
+								'The saved setup steps in .orbit/memory/environment_setup.md ran but the app never became reachable, so they were cleared — the next run will rediscover them from scratch.',
+							);
+
 							reportError(context.setMessages, {
 								kind: 'environment-not-reachable',
 								baseUrl: orbitConfig.baseUrl,

@@ -76,3 +76,16 @@ export function writeEnvironmentSetupInstructions(
 		'utf8',
 	);
 }
+
+// Called when a run that followed documented instructions still failed
+// (gave up, or signaled ready but the app never became reachable) — that's
+// strong evidence the recipe is stale (a changed port, a new required step,
+// etc.), so it's deleted rather than left to keep failing every future run
+// the same way. force:true makes this a no-op if the file is already gone.
+export function invalidateEnvironmentSetupInstructions(
+	projectRoot: string,
+): void {
+	fs.rmSync(path.join(getMemoryDir(projectRoot), 'environment_setup.md'), {
+		force: true,
+	});
+}
