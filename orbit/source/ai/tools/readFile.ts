@@ -31,6 +31,34 @@ const CLASSIFIABLE_EXTENSIONS = new Set([
 	'.cjs',
 ]);
 
+// .env.<suffix> files meant to be shared/committed — they document what
+// variables a project expects without holding real values, so reading them
+// is safe and useful. Everything else named .env or .env.<anything else>
+// (.env, .env.local, .env.production, ...) is assumed to hold real secrets
+// and is never read — see isBlockedEnvFile.
+const ENV_TEMPLATE_SUFFIXES = new Set([
+	'example',
+	'sample',
+	'template',
+	'dist',
+]);
+
+// "Orbit never reads .env file contents" is a documented safety guarantee
+// (see the README's Safety model section) — enforced here, the one place
+// every env-file read has to pass through, rather than trusting every
+// caller (the testing agent, the environment setup agent) to know to avoid
+// it themselves. A file that happens to be named .env.example or similar
+// is explicitly exempted since those are meant to be read (see
+// ENV_TEMPLATE_SUFFIXES); everything else shaped like an env file is
+// blocked outright rather than guessed at case by case.
+function isBlockedEnvFile(relativePath: string): boolean {
+	const basename = path.basename(relativePath);
+	if (basename === '.env') return true;
+	if (!basename.startsWith('.env.')) return false;
+	const suffix = basename.slice('.env.'.length).toLowerCase();
+	return !ENV_TEMPLATE_SUFFIXES.has(suffix);
+}
+
 // Only ever touches projectRoot/signal — declared against that minimal
 // shape rather than the full ToolContext, so it can be reused as-is by any
 // agent whose context has at least those two fields (see the environment
@@ -61,6 +89,14 @@ export const readFileTool: ToolDefinition<
 
 		if (resolved !== context.projectRoot && !resolved.startsWith(rootWithSep)) {
 			return {ok: false, error: 'Path escapes the project root'};
+		}
+
+		if (isBlockedEnvFile(relativePath)) {
+			return {
+				ok: false,
+				error:
+					'Refusing to read an env file — Orbit never reads .env contents, since they can hold real secrets. Check .env.example (or the README) instead if you need to know what environment variables this project expects.',
+			};
 		}
 
 		if (!fs.existsSync(resolved)) {

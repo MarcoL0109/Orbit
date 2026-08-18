@@ -254,6 +254,7 @@ export function initOrbitProject({
 			dockerComposeFile: dockerCompose.file,
 			dockerComposeHasHealthchecks: dockerCompose.hasHealthchecks,
 			scanMode: null,
+			environmentSetupRoot: null,
 		} satisfies OrbitConfig),
 
 		writeTextIfMissing(

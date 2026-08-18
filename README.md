@@ -218,11 +218,14 @@ Run `/memory` to read `overview.md`, `decisions.md`, and `failures.md` back in t
   "maxRepairAttempts": 3,
   "dockerComposeFile": null,
   "dockerComposeHasHealthchecks": false,
-  "scanMode": null
+  "scanMode": null,
+  "environmentSetupRoot": null
 }
 ```
 
 `baseUrl` and `dockerComposeFile` are auto-detected at `/init`. `scanMode` starts `null` (not yet chosen) and gets set the first time you pick regex or graphify. `manualTestDir` holds human-readable `.md` records for features that needed `request_user_input` — never a runnable test, since there's nothing safe to automate for those.
+
+`environmentSetupRoot` matters only when your project's root is itself a subdirectory of a larger repo — a JS frontend with a sibling backend, `docker-compose.yml`, and README one level up, for instance. `read_file` and `run_command` are both sandboxed to the project root everywhere else in Orbit, which is exactly right for writing/running tests (that's where `node_modules/.bin/playwright` and `testDir` actually live) — but it means the environment-setup agent, run from that same root, has no way to even discover a sibling backend exists, let alone start it. Set `environmentSetupRoot` to the repo root (via `/config`) to widen *only* the setup agent's own view; everything else (scanning, `write_test_file`, `run_test`) keeps using the project root unchanged. Leave it `null` when your project root already is the repo root, which is the common case.
 
 ## `~/.orbit/` — global context
 

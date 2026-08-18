@@ -39,6 +39,17 @@ export type OrbitConfig = {
 	// scan happens first for this project, and the answer is persisted
 	// here so they're never asked again. See scanOrchestration.ts.
 	scanMode: 'regex' | 'graphify' | null;
+	// An ancestor directory the environment setup agent should read/run
+	// commands from instead of projectRoot — for a project that is itself a
+	// subdirectory of a larger repo (a JS frontend alongside a sibling
+	// backend, docker-compose.yml, and README one level up), read_file and
+	// run_command's cwd are both sandboxed to projectRoot, so the setup
+	// agent has no way to discover or start anything outside it. Everything
+	// else (write_test_file, run_test, scanning, explain_symbol) keeps using
+	// projectRoot unchanged — this only widens the setup agent's own view.
+	// Null (the default) means projectRoot is used as-is, which is correct
+	// for the common case where the project root already is the repo root.
+	environmentSetupRoot: string | null;
 };
 
 export function getOrbitConfigPath(projectRoot: string): string {

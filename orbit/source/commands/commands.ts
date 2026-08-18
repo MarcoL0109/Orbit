@@ -59,6 +59,7 @@ type ConfigFieldDescriptor =
 	| {key: 'scanMode'; label: string; kind: 'enum'; options: string[]}
 	| {key: 'baseUrl'; label: string; kind: 'text'; nullable: false}
 	| {key: 'testCommand'; label: string; kind: 'text'; nullable: true}
+	| {key: 'environmentSetupRoot'; label: string; kind: 'text'; nullable: true}
 	| {key: 'maxRepairAttempts'; label: string; kind: 'number'}
 	| {key: 'devCommands'; label: string; kind: 'csv'};
 
@@ -89,9 +90,28 @@ const CONFIG_FIELDS: ConfigFieldDescriptor[] = [
 	},
 	{key: 'baseUrl', label: 'Base URL', kind: 'text', nullable: false},
 	{key: 'testCommand', label: 'Test command', kind: 'text', nullable: true},
+	{
+		key: 'environmentSetupRoot',
+		label: 'Environment setup root',
+		kind: 'text',
+		nullable: true,
+	},
 	{key: 'maxRepairAttempts', label: 'Max repair attempts', kind: 'number'},
 	{key: 'devCommands', label: 'Dev commands', kind: 'csv'},
 ];
+
+// The setup agent's own projectRoot: environmentSetupRoot when the project
+// is a subdirectory of a larger repo and that's been configured, otherwise
+// the project's real root — a project where they're the same (the common
+// case) needs nothing set. Pulled out as its own function so this choice
+// has a name and is testable on its own, rather than sitting as an inline
+// ?? at the one call site.
+export function resolveEnvironmentSetupRoot(
+	orbitConfig: Pick<OrbitConfig, 'environmentSetupRoot'>,
+	projectRoot: string,
+): string {
+	return orbitConfig.environmentSetupRoot ?? projectRoot;
+}
 
 function formatConfigFieldValue(
 	config: OrbitConfig,
@@ -362,7 +382,19 @@ Available Orbit commands:
 
 						const setupResult = await runEnvironmentSetupAgent(
 							{
-								projectRoot: context.project.root,
+								// Widened only for the setup agent itself — a
+								// project whose root is a subdirectory of a
+								// larger repo (the JS app alongside a sibling
+								// backend/docker-compose.yml/README) leaves
+								// read_file and run_command's cwd sandboxed to
+								// projectRoot otherwise, with no way to
+								// discover anything one level up. Every other
+								// call below (scan, the testing agent) keeps
+								// using context.project.root unchanged.
+								projectRoot: resolveEnvironmentSetupRoot(
+									orbitConfig,
+									context.project.root,
+								),
 								orbitConfig,
 								signal: controller.signal,
 								requestApproval: context.requestApproval,
