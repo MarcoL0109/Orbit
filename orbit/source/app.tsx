@@ -29,6 +29,7 @@ import {
 	deinitGlobalContext,
 } from './init/deinit.js';
 import {reportError} from './commands/error.js';
+import {readOrbitConfig} from './init/config.js';
 
 type AppProps = {
 	readonly initialPrompt?: string;
@@ -659,6 +660,14 @@ Global memory updated:
 		setConfirmDeinit(false);
 	};
 
+	// Read fresh on every render rather than cached in state — matches how
+	// every command handler already treats config.json (see commands.ts),
+	// and keeps the header in sync immediately after /config edits it.
+	const orbitConfig =
+		project?.hasOrbitFolder && project.root
+			? readOrbitConfig(project.root)
+			: null;
+
 	return (
 		<Box flexDirection="column">
 			<Box borderStyle="round" paddingX={1} flexDirection="column">
@@ -714,9 +723,34 @@ Global memory updated:
 						</>
 					)}
 
-					<Text>
-						Approval: <Text color="yellow">Ask before write/run</Text>
-					</Text>
+					{orbitConfig && (
+						<>
+							<Text>
+								Approval mode:{' '}
+								<Text
+									color={
+										orbitConfig.approvalMode === 'always' ? 'green' : 'yellow'
+									}
+								>
+									{orbitConfig.approvalMode === 'always'
+										? 'Always allow'
+										: 'Ask before running'}
+								</Text>
+							</Text>
+							<Text>
+								Write mode:{' '}
+								<Text
+									color={
+										orbitConfig.writeMode === 'always' ? 'green' : 'yellow'
+									}
+								>
+									{orbitConfig.writeMode === 'always'
+										? 'Always allow'
+										: 'Ask before writing'}
+								</Text>
+							</Text>
+						</>
+					)}
 				</Box>
 			</Box>
 
