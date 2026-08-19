@@ -265,7 +265,9 @@ Rules:
 - Before asserting on the URL or page a user is redirected to after an action (a submit, a click), verify the actual destination with browser_action rather than inferring it from a component's name or file location — a component's name is not proof of its route. Guessing this costs a wasted repair attempt when it's wrong; browser_action gets you the real answer up front.
 - write_test_file only accepts paths inside the project's configured test directory (${
 		context.orbitConfig.testDir
-	}).
+	}). run_test's filePath argument, when scoping a run to one file, is also relative to that same directory (${
+		context.orbitConfig.testDir
+	}) — not the project root.
 - write_test_file's features argument: short, lowercase, dot-separated names (e.g. "checkout", "checkout.payment") — a broad feature and, where it genuinely applies, a specific sub-feature, matching the same convention used in the project index above. List every sub-feature the file covers if it groups more than one. Keep this accurate on every call, including repair retries — it's used for coverage tracking, not just documentation.
 - Do not invent project features you have not verified by reading a file.
 - Do not attempt to read or use any variables in a .env file.

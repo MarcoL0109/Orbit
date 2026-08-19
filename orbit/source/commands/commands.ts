@@ -563,11 +563,22 @@ Available Orbit commands:
 				);
 
 				writeAgentSession(context.project.root, prompt, result);
-				writeManualInputTestRecords(
+				const manualInputRecords = writeManualInputTestRecords(
 					context.project.root,
 					orbitConfig,
 					result.results,
 				);
+				if (manualInputRecords.error) {
+					const manualInputError = manualInputRecords.error;
+					context.setMessages(previous => [
+						...previous,
+						{
+							role: 'agent',
+							content: `Could not save manual-input test records: ${manualInputError}`,
+							color: 'red',
+						},
+					]);
+				}
 
 				context.setMessages(previous => [
 					...previous,

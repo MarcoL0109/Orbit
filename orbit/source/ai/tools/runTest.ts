@@ -1,6 +1,7 @@
 import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import {resolveConfiguredDir} from '../../init/config.js';
 import type {ToolDefinition} from './types.js';
 
 export type TestFailureDetail = {
@@ -222,7 +223,7 @@ export const runTestTool: ToolDefinition<RunTestArgs, RunTestResult> = {
 			filePath: {
 				type: ['string', 'null'],
 				description:
-					'Path relative to the test directory, to run only one file, or null to run the whole suite.',
+					'Path relative to the configured test directory (the same directory write_test_file writes into), to run only one file, or null to run the whole suite. Cannot point outside that directory.',
 			},
 		},
 		required: ['filePath'],
@@ -237,6 +238,26 @@ export const runTestTool: ToolDefinition<RunTestArgs, RunTestResult> = {
 			};
 		}
 
+		const testDirResolution = resolveConfiguredDir(
+			context.projectRoot,
+			context.orbitConfig.testDir,
+			'testDir',
+		);
+		if (!testDirResolution.ok) {
+			return {ok: false, error: testDirResolution.error};
+		}
+
+		if (filePath) {
+			const filePathResolution = resolveConfiguredDir(
+				testDirResolution.path,
+				filePath,
+				'filePath',
+			);
+			if (!filePathResolution.ok) {
+				return {ok: false, error: filePathResolution.error};
+			}
+		}
+
 		if (context.orbitConfig.approvalMode === 'ask') {
 			const approved = await context.requestApproval(
 				`Run ${filePath ?? 'the test suite'}?`,
@@ -246,10 +267,7 @@ export const runTestTool: ToolDefinition<RunTestArgs, RunTestResult> = {
 			}
 		}
 
-		const testDirAbsolute = path.resolve(
-			context.projectRoot,
-			context.orbitConfig.testDir,
-		);
+		const testDirAbsolute = testDirResolution.path;
 		const indexDir = path.join(context.projectRoot, '.orbit', 'index');
 
 		// A fresh, uniquely-named subfolder per run — Playwright cleans
@@ -284,6 +302,8 @@ export const runTestTool: ToolDefinition<RunTestArgs, RunTestResult> = {
 
 		const args = ['test', '--config', configPath, '--reporter=json'];
 		if (filePath) {
+			// Already validated above (before the approval prompt) — this
+			// resolve is guaranteed to stay inside testDirAbsolute.
 			args.push(path.resolve(testDirAbsolute, filePath));
 		}
 

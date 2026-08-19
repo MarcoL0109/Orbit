@@ -80,3 +80,37 @@ export function writeOrbitConfig(
 		'utf8',
 	);
 }
+
+export type ResolvedConfiguredDir =
+	| {ok: true; path: string}
+	| {ok: false; error: string};
+
+// A relative path (testDir against projectRoot, an agent-supplied filePath
+// or relativePath against testDir, ...) is only ever safe to use if it
+// actually stays inside the base it's supposed to be relative to — generated
+// spec files rely on Node's own module resolution walking up from their own
+// location to find @playwright/test, and tools that write or point Playwright
+// at this path must never land on an arbitrary filesystem location, whether
+// from a hand-edited config.json or an agent-supplied argument. Shared by
+// run_test and write_test_file (for both their own testDir and the
+// path/filePath argument each takes within it) rather than duplicated, so
+// all of them enforce the same rule the same way.
+export function resolveConfiguredDir(
+	baseDir: string,
+	relativeDir: string,
+	fieldLabel: string,
+): ResolvedConfiguredDir {
+	const resolved = path.resolve(baseDir, relativeDir);
+	const baseDirWithSep = baseDir.endsWith(path.sep)
+		? baseDir
+		: baseDir + path.sep;
+
+	if (resolved !== baseDir && !resolved.startsWith(baseDirWithSep)) {
+		return {
+			ok: false,
+			error: `${fieldLabel} ("${relativeDir}") resolves outside ${baseDir} — it must stay inside it.`,
+		};
+	}
+
+	return {ok: true, path: resolved};
+}

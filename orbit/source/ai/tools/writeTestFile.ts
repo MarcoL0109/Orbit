@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {checksumFromContent} from '../../projects/checksum.js';
 import {recordClassification} from '../../projects/featureClassification.js';
+import {resolveConfiguredDir} from '../../init/config.js';
 import type {ToolDefinition} from './types.js';
 
 type WriteTestFileArgs = {
@@ -43,18 +44,26 @@ export const writeTestFileTool: ToolDefinition<
 		required: ['relativePath', 'content', 'features'],
 	},
 	async execute({relativePath, content, features}, context) {
-		const testDirAbsolute = path.resolve(
+		const testDirResolution = resolveConfiguredDir(
 			context.projectRoot,
 			context.orbitConfig.testDir,
+			'testDir',
 		);
-		const testDirWithSep = testDirAbsolute.endsWith(path.sep)
-			? testDirAbsolute
-			: testDirAbsolute + path.sep;
-		const resolved = path.resolve(testDirAbsolute, relativePath);
-
-		if (resolved !== testDirAbsolute && !resolved.startsWith(testDirWithSep)) {
-			return {ok: false, error: 'Path escapes the configured test directory'};
+		if (!testDirResolution.ok) {
+			return {ok: false, error: testDirResolution.error};
 		}
+
+		const testDirAbsolute = testDirResolution.path;
+		const relativePathResolution = resolveConfiguredDir(
+			testDirAbsolute,
+			relativePath,
+			'relativePath',
+		);
+		if (!relativePathResolution.ok) {
+			return {ok: false, error: relativePathResolution.error};
+		}
+
+		const resolved = relativePathResolution.path;
 
 		if (context.orbitConfig.writeMode === 'ask') {
 			const approved = await context.requestApproval(

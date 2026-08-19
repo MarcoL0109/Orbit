@@ -329,7 +329,16 @@ async function runCiBody(
 	}
 
 	deps.writeAgentSession(projectRoot, prompt, result);
-	deps.writeManualInputTestRecords(projectRoot, orbitConfig, result.results);
+	const manualInputRecords = deps.writeManualInputTestRecords(
+		projectRoot,
+		orbitConfig,
+		result.results,
+	);
+	if (manualInputRecords.error) {
+		deps.logError(
+			`Could not save manual-input test records: ${manualInputRecords.error}`,
+		);
+	}
 
 	deps.log(formatAgentRunResult(result));
 

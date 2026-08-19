@@ -77,7 +77,7 @@ function preflightOkDeps(): Partial<CiDeps> {
 		},
 		writeProjectMap: () => '',
 		writeAgentSession: () => '',
-		writeManualInputTestRecords: () => [],
+		writeManualInputTestRecords: () => ({paths: [], error: null}),
 		log() {},
 		logError() {},
 		exit: noopExit,
