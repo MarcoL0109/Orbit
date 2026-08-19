@@ -30,7 +30,12 @@ import {
 } from './init/deinit.js';
 import {reportError} from './commands/error.js';
 import {readOrbitConfig} from './init/config.js';
-import {CONFIG_FIELDS, formatConfigFieldValue} from './commands/commands.js';
+import {
+	CONFIG_FIELDS,
+	formatConfigFieldValue,
+	runAskFlow,
+} from './commands/commands.js';
+import {generateRecommendedPrompt} from './ai/recommendPrompt.js';
 
 type AppProps = {
 	readonly initialPrompt?: string;
@@ -86,8 +91,25 @@ export function App({initialPrompt}: AppProps) {
 	} | null>(null);
 	const [pendingInputValue, setPendingInputValue] = useState<string>('');
 	const [agentActivity, setAgentActivity] = useState<string | null>(null);
+	// Populated in the background by generateRecommendedPrompt — a real LLM
+	// call, not a synchronous computation, so it can't just be derived
+	// inline during render the way ghostCompletetion is. Refreshed after
+	// boot and after every submitted prompt (command or ask), since either
+	// can change what's worth suggesting next (a new test result, a fresh
+	// scan). recommendedPromptRequestRef guards against an older, slower
+	// call's result landing after a newer one already resolved.
+	const [recommendedPrompt, setRecommendedPrompt] = useState<string | null>(
+		null,
+	);
 	const currentAbortControllerRef = useRef<AbortController | null>(null);
 	const readyEnvironmentsRef = useRef<Set<string>>(new Set());
+	const recommendedPromptRequestRef = useRef<number>(0);
+	// Mirrors `messages` for refreshRecommendedPrompt, which runs after an
+	// awaited command/ask flow finishes — by then `messages` itself (a
+	// value captured in that earlier closure) is stale, since every push
+	// along the way used the functional setMessages(prev => ...) form. The
+	// ref is kept current by the effect below on every render instead.
+	const messagesRef = useRef<Message[]>([]);
 	const ghostCompletetion = getGhostCompletion(query);
 	const confirmationOptions = [
 		{label: 'Confirm', value: 'confirm'},
@@ -102,12 +124,32 @@ export function App({initialPrompt}: AppProps) {
 		readyEnvironmentsRef.current.add(projectRoot);
 	}
 
+	function refreshRecommendedPrompt(projectRoot: string): void {
+		const requestId = recommendedPromptRequestRef.current + 1;
+		recommendedPromptRequestRef.current = requestId;
+
+		generateRecommendedPrompt(projectRoot, messagesRef.current)
+			.then(prompt => {
+				if (recommendedPromptRequestRef.current === requestId) {
+					setRecommendedPrompt(prompt);
+				}
+			})
+			.catch(() => {
+				if (recommendedPromptRequestRef.current === requestId) {
+					setRecommendedPrompt(null);
+				}
+			});
+	}
+
 	useInput((_input, key) => {
 		if (key.tab) {
 			const completion = getBestCommandCompletion(query);
 
 			if (completion) {
 				setQuery(completion);
+				setQueryInputKey(previous => previous + 1);
+			} else if (query === '' && recommendedPrompt) {
+				setQuery(recommendedPrompt);
 				setQueryInputKey(previous => previous + 1);
 			}
 		}
@@ -118,6 +160,10 @@ export function App({initialPrompt}: AppProps) {
 			setPendingInputValue('');
 		}
 	});
+
+	useEffect(() => {
+		messagesRef.current = messages;
+	}, [messages]);
 
 	useEffect(() => {
 		async function bootOrbit() {
@@ -135,6 +181,7 @@ export function App({initialPrompt}: AppProps) {
 						content: `Project detected: ${detectedProject.root}`,
 					},
 				]);
+				refreshRecommendedPrompt(detectedProject.root);
 			} else {
 				const options = constructProjectOptions();
 				setProjectOptions(options);
@@ -370,7 +417,7 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 			},
 		]);
 
-		const commandHandled = await runCommand(prompt, {
+		const commandContext = {
 			setMessages,
 			setQuery,
 			setIsThinking,
@@ -397,9 +444,12 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 			setAgentActivity,
 			isEnvironmentReady,
 			markEnvironmentReady,
-		});
+		};
+
+		const commandHandled = await runCommand(prompt, commandContext);
 
 		if (commandHandled) {
+			if (project?.root) refreshRecommendedPrompt(project.root);
 			return;
 		}
 
@@ -416,15 +466,9 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 			return;
 		}
 
-		setIsThinking(true);
-		setMessages(previous => [
-			...previous,
-			{
-				role: 'agent',
-				content: 'This is a fake response from Orbit',
-			},
-		]);
-		setIsThinking(false);
+		await runAskFlow(prompt, commandContext);
+
+		if (project?.root) refreshRecommendedPrompt(project.root);
 	};
 
 	const handleProjectPath = () => {
@@ -829,7 +873,11 @@ Global memory updated:
 					<TextInput
 						key={queryInputKey}
 						value={query}
-						placeholder="Ask Orbit to test something"
+						placeholder={
+							isThinking
+								? '/abort to terminate the current task'
+								: recommendedPrompt ?? 'Ask Orbit to test something'
+						}
 						onChange={setQuery}
 						onSubmit={handleSubmitQuery}
 					/>

@@ -5,29 +5,22 @@ import {
 } from '../registry/knownProjects.js';
 import {getProjectDisplayName, detectProjectAtPath} from '../projects/search.js';
 import {
-	runTestingAgent,
-	formatAgentRunResult,
 	describeAgentActivity,
 	summarizeMemory,
 	type MemorySections,
 } from '../ai/agent.js';
-import {runEnvironmentSetupAgent} from '../ai/environmentSetupAgent.js';
-import {writeAgentSession, writeManualInputTestRecords} from '../ai/session.js';
+import {runAskAgent} from '../ai/askAgent.js';
 import {
 	readOrbitConfig,
 	writeOrbitConfig,
 	type OrbitConfig,
 } from '../init/config.js';
-import {
-	readProjectMemory,
-	readEnvironmentSetupInstructions,
-	writeEnvironmentSetupInstructions,
-	invalidateEnvironmentSetupInstructions,
-} from '../init/memory.js';
+import {readProjectMemory} from '../init/memory.js';
 import {writeProjectMap, formatScanResult} from '../projects/scan.js';
 import {
 	scanProjectWithModeSelection,
 	graphifyOutcomeMessage,
+	runGraphifyAndGetOutcome,
 } from '../projects/scanOrchestration.js';
 import {getProjectPath} from '../init/deinit.js';
 import {
@@ -37,10 +30,15 @@ import {
 	colorForCoverageStatus,
 	type CoverageEntry,
 } from '../projects/coverage.js';
-import {isReachable, waitUntilReachable} from '../projects/reachability.js';
 import {cleanupTrackedProcesses} from '../projects/processTracking.js';
+import {runTestCommand} from './testCommand.js';
 import type {CommandContext} from './context.js';
 import {reportError, type ArgCountRule} from './error.js';
+
+export {
+	resolveEnvironmentSetupRoot,
+	type TestCommandOutcome,
+} from './testCommand.js';
 
 // /config's editable fields — deliberately a subset of OrbitConfig.
 // dockerComposeFile and dockerComposeHasHealthchecks are auto-detected
@@ -101,19 +99,6 @@ export const CONFIG_FIELDS: ConfigFieldDescriptor[] = [
 	{key: 'devCommands', label: 'Dev commands', kind: 'csv'},
 ];
 
-// The setup agent's own projectRoot: environmentSetupRoot when the project
-// is a subdirectory of a larger repo and that's been configured, otherwise
-// the project's real root — a project where they're the same (the common
-// case) needs nothing set. Pulled out as its own function so this choice
-// has a name and is testable on its own, rather than sitting as an inline
-// ?? at the one call site.
-export function resolveEnvironmentSetupRoot(
-	orbitConfig: Pick<OrbitConfig, 'environmentSetupRoot'>,
-	projectRoot: string,
-): string {
-	return orbitConfig.environmentSetupRoot ?? projectRoot;
-}
-
 export function formatConfigFieldValue(
 	config: OrbitConfig,
 	field: ConfigFieldDescriptor,
@@ -125,22 +110,39 @@ export function formatConfigFieldValue(
 	return String(value);
 }
 
-// Shared by both environment-setup failure branches below: a saved recipe
-// that just failed to bring the app up is more likely wrong than the
-// project itself being broken, so it's cleared rather than left to repeat
-// the same failure on every future run.
-function invalidateStaleSetupInstructions(
+// Only ever refreshes graphify — never triggers the interactive
+// mode-selection prompt /scan and /test use, since a question typed as a
+// bare prompt shouldn't suddenly ask the user to choose a scan mode. If
+// graphify mode was already chosen, this keeps the graph explain_symbol
+// reads from going stale between /test runs (or before one has ever
+// happened); if it wasn't chosen yet, or the project isn't /init'd, this is
+// a no-op. Non-fatal by the same reasoning /test's own pre-run scan uses —
+// a failed refresh just means explain_symbol works off whatever graph (if
+// any) was already on disk.
+function refreshGraphifyIfEnabled(
 	projectRoot: string,
+	hasOrbitFolder: boolean | undefined,
 	setMessages: CommandContext['setMessages'],
-	hadDocumentedInstructions: boolean,
-	reason: string,
 ): void {
-	if (!hadDocumentedInstructions) return;
-	invalidateEnvironmentSetupInstructions(projectRoot);
-	setMessages(previous => [
-		...previous,
-		{role: 'agent', content: reason, color: 'gray'},
-	]);
+	if (!hasOrbitFolder) return;
+
+	try {
+		const orbitConfig = readOrbitConfig(projectRoot);
+		if (orbitConfig?.scanMode !== 'graphify') return;
+
+		const graphifyMessage = graphifyOutcomeMessage(
+			runGraphifyAndGetOutcome(projectRoot),
+		);
+		if (!graphifyMessage) return;
+
+		setMessages(previous => [...previous, {role: 'agent', ...graphifyMessage}]);
+	} catch (error) {
+		reportError(setMessages, {
+			kind: 'unexpected',
+			action: 'Refreshing the code graph',
+			cause: error,
+		});
+	}
 }
 
 function formatConfigSummary(config: OrbitConfig): string {
@@ -148,6 +150,79 @@ function formatConfigSummary(config: OrbitConfig): string {
 		field => `${field.label}: ${formatConfigFieldValue(config, field)}`,
 	);
 	return `Current configuration:\n${lines.join('\n')}`;
+}
+
+// Handles a plain-text prompt (no leading /) — not a command, so it's called
+// directly by app.tsx rather than dispatched through runCommand, but shaped
+// like a command handler (same CommandContext, same try/finally cleanup) so
+// it reuses the exact same busy/error/abort plumbing every real command
+// already has. Deliberately lighter than /test's handler: no orbitConfig
+// requirement, no environment reachability check, no full mode-selection
+// scan — this works even before a project has been /init'd for anything
+// that stays read-only (read_file, check_memory, check_coverage,
+// refresh_project_scan). It also has access to run_test_command (the real
+// /test, with real side effects), which is why the full CommandContext is
+// passed through below rather than a narrower slice — that tool needs
+// essentially everything a real /test invocation does, and every single
+// call to it asks for approval on its own regardless.
+export async function runAskFlow(
+	prompt: string,
+	context: CommandContext,
+): Promise<void> {
+	if (!context.project?.root) {
+		reportError(context.setMessages, {kind: 'no-project-selected'});
+		return;
+	}
+
+	const projectRoot = context.project.root;
+
+	try {
+		context.setIsThinking(true);
+		const controller = context.startAbortableTask();
+
+		refreshGraphifyIfEnabled(
+			projectRoot,
+			context.project.hasOrbitFolder,
+			context.setMessages,
+		);
+
+		const result = await runAskAgent(
+			prompt,
+			{...context, projectRoot, signal: controller.signal},
+			{
+				onProgress(event) {
+					context.setAgentActivity(describeAgentActivity(event));
+				},
+			},
+		);
+
+		if (result.status === 'aborted') {
+			context.setMessages(previous => [
+				...previous,
+				{role: 'agent', content: `Aborted: ${result.answer}`, color: 'yellow'},
+			]);
+			return;
+		}
+
+		context.setMessages(previous => [
+			...previous,
+			{
+				role: 'agent',
+				content: result.answer,
+				color: result.status === 'gave_up' ? 'yellow' : undefined,
+			},
+		]);
+	} catch (error) {
+		reportError(context.setMessages, {
+			kind: 'unexpected',
+			action: 'Ask',
+			cause: error,
+		});
+	} finally {
+		context.setIsThinking(false);
+		context.setAgentActivity(null);
+		context.clearAbortableTask();
+	}
 }
 
 export type OrbitCommand = {
@@ -330,292 +405,10 @@ Available Orbit commands:
 		async handler(_args, context) {
 			const prompt = _args.join(' ').trim();
 
-			if (!context.project?.root) {
-				reportError(context.setMessages, {kind: 'no-project-selected'});
-				return;
-			}
-
-			const orbitConfig = context.project.hasOrbitFolder
-				? readOrbitConfig(context.project.root)
-				: null;
-
-			if (!orbitConfig) {
-				reportError(context.setMessages, {kind: 'project-not-initialized'});
-				return;
-			}
-
 			try {
 				context.setIsThinking(true);
 				const controller = context.startAbortableTask();
-
-				// Set only when Orbit itself starts Docker infrastructure
-				// this run (not when the environment was already reachable,
-				// and not on later /test calls in the same session that
-				// just reuse it) — used below to show a one-time reminder
-				// that Orbit deliberately never tears containers down
-				// itself. See the incident this followed: a manual
-				// `docker compose down` outside any Orbit code path removed
-				// a container that predated the session entirely.
-				let startedDockerInfraThisRun = false;
-
-				// Runs at most once per project per session — see
-				// CommandContext.isEnvironmentReady's own note on why a
-				// crash mid-session isn't auto-recovered from.
-				if (!context.isEnvironmentReady(context.project.root)) {
-					const alreadyReachable = await isReachable(orbitConfig.baseUrl);
-
-					if (alreadyReachable) {
-						context.markEnvironmentReady(context.project.root);
-					} else {
-						// Give the user a chance to hand-write the startup
-						// sequence before defaulting to AI discovery — they
-						// usually already know it (they built the project),
-						// and typing it out is far faster than the agent
-						// rediscovering it live through trial and error.
-						// requestInput here is just a "press Enter when
-						// you're done editing the file" gate, not a text
-						// collector — a multi-line shell recipe doesn't
-						// belong typed into the single-line TextInput it
-						// renders (see app.tsx), so the actual editing
-						// happens in the user's own editor against the file
-						// directly.
-						if (
-							readEnvironmentSetupInstructions(context.project.root) === null
-						) {
-							await context.requestInput(
-								`No dev environment startup instructions found. Add them to .orbit/memory/environment_setup.md now, then press Enter to continue — or just press Enter to let Orbit figure it out itself instead (slower, first run only).`,
-							);
-						}
-
-						context.setAgentActivity('Setting up the dev environment...');
-
-						// Captured after the pause above, not before — this
-						// reflects whatever the user actually did (wrote
-						// their own file, or skipped) rather than stale
-						// pre-prompt state, and is what decides whether a
-						// returned setupProcedure gets persisted below. A
-						// file the user just hand-wrote is never overwritten
-						// by the agent's own reconstruction of it.
-						const hadDocumentedInstructions =
-							readEnvironmentSetupInstructions(context.project.root) !== null;
-
-						const setupResult = await runEnvironmentSetupAgent(
-							{
-								// Widened only for the setup agent itself — a
-								// project whose root is a subdirectory of a
-								// larger repo (the JS app alongside a sibling
-								// backend/docker-compose.yml/README) leaves
-								// read_file and run_command's cwd sandboxed to
-								// projectRoot otherwise, with no way to
-								// discover anything one level up. Every other
-								// call below (scan, the testing agent) keeps
-								// using context.project.root unchanged.
-								projectRoot: resolveEnvironmentSetupRoot(
-									orbitConfig,
-									context.project.root,
-								),
-								orbitConfig,
-								signal: controller.signal,
-								requestApproval: context.requestApproval,
-							},
-							{
-								onProgress(event) {
-									context.setAgentActivity(describeAgentActivity(event));
-								},
-							},
-						);
-
-						if (setupResult.status === 'aborted') {
-							context.setMessages(previous => [
-								...previous,
-								{
-									role: 'agent',
-									content: `Aborted: ${setupResult.notes}`,
-									color: 'yellow',
-								},
-							]);
-							return;
-						}
-
-						if (setupResult.status === 'gave_up') {
-							// The agent got stuck trying to follow a recipe it
-							// was told to trust — that recipe is probably why
-							// it's stuck, so clear it rather than handing the
-							// next run the same dead end.
-							invalidateStaleSetupInstructions(
-								context.project.root,
-								context.setMessages,
-								hadDocumentedInstructions,
-								'The saved setup steps in .orbit/memory/environment_setup.md failed, so they were cleared — the next run will rediscover them from scratch.',
-							);
-
-							reportError(context.setMessages, {
-								kind: 'environment-setup-gave-up',
-								notes: setupResult.notes,
-							});
-							return;
-						}
-
-						// Status === 'signaled' — its own belief is never
-						// trusted as proof; verify independently. Retried
-						// over a short window, not a single check: a
-						// service that was just told to start can take a
-						// few seconds to actually bind its port after the
-						// start command itself has already returned.
-						context.setAgentActivity(
-							'Confirming the environment is reachable...',
-						);
-						const nowReachable = await waitUntilReachable(orbitConfig.baseUrl);
-						if (!nowReachable) {
-							// The agent followed the documented recipe and
-							// believed it worked, but the app never actually
-							// came up — the recipe itself is the likely
-							// culprit, so clear it rather than repeating the
-							// same failure on every future run.
-							invalidateStaleSetupInstructions(
-								context.project.root,
-								context.setMessages,
-								hadDocumentedInstructions,
-								'The saved setup steps in .orbit/memory/environment_setup.md ran but the app never became reachable, so they were cleared — the next run will rediscover them from scratch.',
-							);
-
-							reportError(context.setMessages, {
-								kind: 'environment-not-reachable',
-								baseUrl: orbitConfig.baseUrl,
-								notes: setupResult.notes,
-							});
-							return;
-						}
-
-						// Only ever writes a file the agent had to
-						// discover from scratch — never overwrites one that
-						// was already there to follow, and never writes on
-						// a self-report that reachability then contradicted.
-						if (!hadDocumentedInstructions && setupResult.setupProcedure) {
-							writeEnvironmentSetupInstructions(
-								context.project.root,
-								setupResult.setupProcedure,
-							);
-							context.setMessages(previous => [
-								...previous,
-								{
-									role: 'agent',
-									content:
-										'Saved the setup steps it discovered to .orbit/memory/environment_setup.md for next time.',
-									color: 'gray',
-								},
-							]);
-						}
-
-						context.markEnvironmentReady(context.project.root);
-						startedDockerInfraThisRun = orbitConfig.dockerComposeFile !== null;
-					}
-				}
-
-				// Keep the project index fresh before every run — cheap in
-				// practice since scanProject skips unchanged files by
-				// mtime/size, and non-fatal if it fails: the agent still
-				// works from whatever map (if any) was already on disk.
-				try {
-					context.setAgentActivity('Scanning project for changes...');
-					const {projectMap, graphifyOutcome} = await scanProjectWithModeSelection(
-						context.project.root,
-						{
-							requestApproval: context.requestApproval,
-							requestScanMode: context.requestScanMode,
-							setMessages: context.setMessages,
-						},
-					);
-					writeProjectMap(context.project.root, projectMap);
-
-					const graphifyMessage = graphifyOutcomeMessage(graphifyOutcome);
-					if (graphifyMessage) {
-						context.setMessages(previous => [
-							...previous,
-							{role: 'agent', ...graphifyMessage},
-						]);
-					}
-				} catch (error) {
-					reportError(context.setMessages, {
-						kind: 'unexpected',
-						action: 'Pre-test project scan',
-						cause: error,
-					});
-				}
-
-				context.setAgentActivity('Analyzing the request...');
-
-				const result = await runTestingAgent(
-					prompt,
-					{
-						projectRoot: context.project.root,
-						orbitConfig,
-						signal: controller.signal,
-						requestApproval: context.requestApproval,
-						requestInput: context.requestInput,
-						requestOutcomeConfirmation: context.requestOutcomeConfirmation,
-					},
-					{
-						onProgress(event) {
-							context.setAgentActivity(describeAgentActivity(event));
-						},
-					},
-				);
-
-				writeAgentSession(context.project.root, prompt, result);
-				const manualInputRecords = writeManualInputTestRecords(
-					context.project.root,
-					orbitConfig,
-					result.results,
-				);
-				if (manualInputRecords.error) {
-					const manualInputError = manualInputRecords.error;
-					context.setMessages(previous => [
-						...previous,
-						{
-							role: 'agent',
-							content: `Could not save manual-input test records: ${manualInputError}`,
-							color: 'red',
-						},
-					]);
-				}
-
-				context.setMessages(previous => [
-					...previous,
-					{
-						role: 'agent',
-						content: formatAgentRunResult(result),
-						color:
-							result.status === 'passed'
-								? 'green'
-								: result.status === 'aborted'
-								? 'yellow'
-								: 'red',
-					},
-				]);
-
-				// One-time per session, not on every /test — see
-				// isEnvironmentReady's own caching, which is exactly why
-				// this only needs to fire once even across many /test runs
-				// against the same project. Orbit never runs this itself;
-				// it's left entirely to the user.
-				if (startedDockerInfraThisRun) {
-					context.setMessages(previous => [
-						...previous,
-						{
-							role: 'agent',
-							content:
-								"Docker containers are still running for this project. Orbit leaves them up for reuse across /test runs and never stops them on its own — run `docker compose down` yourself when you're done with them.",
-							color: 'gray',
-						},
-					]);
-				}
-			} catch (error) {
-				reportError(context.setMessages, {
-					kind: 'unexpected',
-					action: 'Test agent run',
-					cause: error,
-				});
+				await runTestCommand(prompt, context, controller.signal);
 			} finally {
 				context.setIsThinking(false);
 				context.setAgentActivity(null);

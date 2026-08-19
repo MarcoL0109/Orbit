@@ -18,13 +18,20 @@ export type ExplainSymbolResult = {
 
 const MAX_LISTED_CANDIDATES = 10;
 
+// Only ever touches projectRoot — declared against that minimal shape
+// (matching read_file's own signal-inclusive minimal Ctx, for interop with
+// any agent whose context is smaller than the full ToolContext) rather than
+// the full ToolContext, so it's reusable by the ask agent as well as the
+// testing agent's own larger registry.
+//
 // Only ever registered when graphify scan mode produced a graph for this
 // project (see agent.ts's dynamic registry construction) — the model never
 // sees this tool at all otherwise, so execute() failing gracefully here is
 // just defense in depth, not the primary guard.
 export const explainSymbolTool: ToolDefinition<
 	ExplainSymbolArgs,
-	ExplainSymbolResult
+	ExplainSymbolResult,
+	{projectRoot: string; signal: AbortSignal}
 > = {
 	name: 'explain_symbol',
 	description:

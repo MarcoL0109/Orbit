@@ -1,10 +1,17 @@
 import {spawn} from 'node:child_process';
 import {trackProcess} from '../../projects/processTracking.js';
-import type {
-	EnvironmentSetupContext,
-	ToolDefinition,
-	ToolResult,
-} from './types.js';
+import type {ToolDefinition, ToolResult} from './types.js';
+
+// Only ever touches projectRoot/signal/requestApproval — declared against
+// that minimal shape (matching read_file's own pattern) rather than the
+// full EnvironmentSetupContext, so it's reusable by any agent whose context
+// has at least these three fields (see the ask agent, whose context has no
+// orbitConfig at all).
+export type RunCommandContext = {
+	projectRoot: string;
+	signal: AbortSignal;
+	requestApproval: (description: string) => Promise<boolean>;
+};
 
 export type RunCommandArgs = {
 	command: string;
@@ -53,7 +60,7 @@ function truncate(text: string): string {
 export const runCommandTool: ToolDefinition<
 	RunCommandArgs,
 	RunCommandResult,
-	EnvironmentSetupContext
+	RunCommandContext
 > = {
 	name: 'run_command',
 	description:

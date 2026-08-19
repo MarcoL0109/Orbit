@@ -143,7 +143,7 @@ async function resolveScanModeChoice(
 	return runGraphifyAndGetOutcome(projectRoot);
 }
 
-function runGraphifyAndGetOutcome(projectRoot: string): GraphifyOutcome {
+export function runGraphifyAndGetOutcome(projectRoot: string): GraphifyOutcome {
 	const result = runGraphifyScan(projectRoot);
 
 	return result.ok

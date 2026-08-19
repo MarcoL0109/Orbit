@@ -12,6 +12,7 @@ import {
 	explainSymbolTool,
 	type ToolContext,
 	type ToolDefinition,
+	type ToolResult,
 } from './tools/index.js';
 import {spawnBrowserWorker, type BrowserWorkerHandle} from './browserWorker.js';
 import {
@@ -53,10 +54,81 @@ export function describeAgentActivity(event: AgentProgressEvent): string {
 	return ACTIVITY_LABEL[event.name] ?? `Running ${event.name}...`;
 }
 
+// The other half of describeAgentActivity: not "what is it about to do" but
+// "what actually happened" — shown once a step's tool_result comes back, so
+// a step-by-step log reads as a sequence of (started X, X's outcome) pairs
+// rather than just a list of things that were attempted. Per-tool cases pull
+// the one detail worth surfacing from that tool's own args/result shape;
+// everything else falls back to a generic pass/fail line.
+export function describeAgentStepOutcome(
+	name: string,
+	args: unknown,
+	result: ToolResult,
+): string {
+	if (!result.ok) {
+		const label = ACTIVITY_LABEL[name]?.replace(/\.{3}$/, '') ?? name;
+		return `✗ ${label} — ${result.error}`;
+	}
+
+	switch (name) {
+		case 'read_file': {
+			const {path: filePath} = args as {path?: string};
+			return `✓ Read ${filePath ?? 'file'}`;
+		}
+
+		case 'write_test_file': {
+			const {relativePath} = args as {relativePath?: string};
+			return `✓ Wrote ${relativePath ?? 'test file'}`;
+		}
+
+		case 'run_test': {
+			const {passed, passedCount, totalTests} = result.data as {
+				passed?: boolean;
+				passedCount?: number;
+				totalTests?: number;
+			};
+			return typeof passedCount === 'number' && typeof totalTests === 'number'
+				? `${passed ? '✓' : '✗'} Test run: ${passedCount}/${totalTests} passed`
+				: '✓ Test run finished';
+		}
+
+		case 'explain_symbol': {
+			const {label} = args as {label?: string};
+			return `✓ Looked up ${label ?? 'symbol'}`;
+		}
+
+		case 'browser_action': {
+			const {action} = args as {action?: string};
+			return `✓ Browser: ${action ?? 'action'}`;
+		}
+
+		case 'report_result': {
+			return '✓ Reported results';
+		}
+
+		case 'confirm_outcome': {
+			return '✓ Got outcome confirmation';
+		}
+
+		case 'request_user_input': {
+			return '✓ Got user input';
+		}
+
+		default: {
+			return `✓ ${name}`;
+		}
+	}
+}
+
 export type RunTestingAgentOptions = {
 	maxSteps?: number;
 	client?: ResponsesClient;
 	onProgress?: (event: AgentProgressEvent) => void;
+	// Fires once a dispatched tool call's result comes back — separate from
+	// onProgress (which fires at dispatch time, before the result exists) so
+	// a caller can show "started X" and "X's outcome" as two distinct,
+	// appendable lines rather than one line that gets overwritten.
+	onStepResult?: (name: string, args: unknown, result: ToolResult) => void;
 };
 
 const MAX_LISTED_ITEMS = 50;
@@ -96,7 +168,7 @@ function collectTestsWrittenThisRun(
 // once it knows which file is relevant. extraTestFiles covers the one gap
 // the last /scan can't: test files this run has itself written since that
 // scan ran, which won't be in projectMap yet.
-function summarizeProjectMap(
+export function summarizeProjectMap(
 	projectMap: ProjectMap | null,
 	extraTestFiles: string[],
 ): string {
@@ -207,7 +279,7 @@ export function summarizeMemory(
 			`## Project overview\n${memory.overview}`,
 		include.decisions &&
 			memory.decisions &&
-			`## Testing decisions and conventions\n${memory.decisions ? memory.decisions : "No content yet"}`,
+			`## Testing decisions and conventions\n${memory.decisions}`,
 		include.environment &&
 			`## Environment setup Instructions\n${memory.enviornment}`,
 		include.failures &&
@@ -434,6 +506,8 @@ export async function runTestingAgent(
 							(args as {feature: string}).feature,
 						);
 					}
+
+					options.onStepResult?.(name, args, result);
 				},
 			});
 
