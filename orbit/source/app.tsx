@@ -24,6 +24,10 @@ import {
 	graphifyOutcomeMessage,
 } from './projects/scanOrchestration.js';
 import {
+	ensurePlaywrightSetup,
+	playwrightSetupOutcomeMessage,
+} from './projects/playwrightSetup.js';
+import {
 	deinitLocalContext,
 	getProjectPath,
 	deinitGlobalContext,
@@ -622,13 +626,19 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 					const projectMapPath = writeProjectMap(project.root, projectMap);
 					graphifyMessage = graphifyOutcomeMessage(graphifyOutcome);
 
+					const playwrightOutcome = await ensurePlaywrightSetup(project.root, {
+						requestApproval,
+					});
+					const playwrightMessage =
+						playwrightSetupOutcomeMessage(playwrightOutcome);
+
 					setMessages(previous => [
 						...previous,
 						{
 							role: 'agent',
 							content: `${formatInitResult(initResultFiles)}${
 								graphifyMessage ? `\n${graphifyMessage.content}\n` : ''
-							}
+							}${playwrightMessage ? `\n${playwrightMessage.content}\n` : ''}
 Global memory updated:
 ✓ ~/.orbit/projects.json`,
 							color: 'green',

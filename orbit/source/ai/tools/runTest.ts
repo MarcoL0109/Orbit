@@ -32,7 +32,7 @@ export type RunTestResult = {
 	reportPath: string;
 };
 
-function findPlaywrightBinary(projectRoot: string): string | null {
+export function findPlaywrightBinary(projectRoot: string): string | null {
 	const binName =
 		process.platform === 'win32' ? 'playwright.cmd' : 'playwright';
 	const binPath = path.join(projectRoot, 'node_modules', '.bin', binName);
