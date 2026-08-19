@@ -19,6 +19,7 @@ AI QA agent for project scanning, test planning, and E2E automation
 * Asks for your help on anything it has no way to do itself (a 2FA code, an email verification link)
 * Keeps a per-project knowledge graph (optional, via [graphify](https://github.com/Graphify-Labs/graphify)) so it can understand how code connects without opening every file
 * Tracks feature coverage — which routes and components have a matching test and which don't
+* Answers plain questions about the project directly — no `/command` needed — reading real code and, with your approval, running a real `/test` when you actually want one
 * Runs headlessly from a CI pipeline (`--ci`) — same agent, no interactive prompts, exits with a pass/fail status code
 
 Every file write, shell command, and test run is approval-gated by default — you see exactly what Orbit is about to do before it does it.
@@ -99,6 +100,20 @@ Shows which routes and components still have no test at all.
 * **`report_result`** — report one pass/fail result per feature, with a summary
 
 Before writing a fix, the agent reads real markup and watches the real page, not just the source — and it's told explicitly to tell a genuine application bug apart from its own mistake using the browser's network/console evidence, rather than inferring one from silence. A repair budget (`maxRepairAttempts`, default 3) caps how many times it'll patch a failing test before giving up and reporting the feature as failed.
+
+## Asking Orbit questions
+
+Type a plain question instead of a `/command` and Orbit answers it directly — grounded in what it can actually find out about the project, not a guess. This is a separate, smaller agent from `/test`'s: it never writes or runs a test on its own initiative, and its own tools reflect that:
+
+* **`read_file`** / **`explain_symbol`** — the same code-exploration tools `/test` uses
+* **`check_memory`** — the same content `/memory` shows
+* **`check_coverage`** — the same report `/coverage` shows
+* **`refresh_project_scan`** — refreshes the project index (and the knowledge graph, if this project already uses graphify) — the non-interactive part of what `/scan` does
+* **`run_test_command`** — the real `/test`: writes and runs a real Playwright test against the live app. The one exception to "never writes or runs on its own" — every single call asks for your approval first, with no way around it, so it only ever happens when you actually mean it to
+
+The first four are read-only and never prompt. Ask it things like *"how does authentication work here?"*, *"what's not covered yet?"*, or *"why did the last test fail?"* — it reads source, checks the knowledge graph (if available), or reaches for one of the commands above as needed, then answers in its own words instead of dumping raw output back at you.
+
+Press Tab on an empty prompt to accept a recommended next question — generated fresh from the project's actual current state (a recent test failure worth digging into, an obvious coverage gap, or a natural first question for a brand-new project with no history yet), the same way Tab completes a partially-typed `/command` name.
 
 ## Starting your dev environment automatically
 
@@ -241,7 +256,7 @@ Run `/memory` to read `overview.md`, `decisions.md`, `environment_setup.md` and 
 
 ## Safety model
 
-Every file write, shell command, and destructive test-environment action is gated behind an explicit approval prompt by default (`approvalMode`/`writeMode: "ask"`) — you see exactly what's about to run and why before it happens. Orbit never classifies a shell command as "safe" or "dangerous" by its text — that judgment isn't reliable to automate, so every command gets the same approval gate regardless of what it looks like. Orbit never reads `.env` file contents, and never stores API keys, passwords, tokens, or real user data in its own memory files.
+Every file write, shell command, and destructive test-environment action is gated behind an explicit approval prompt by default (`approvalMode`/`writeMode: "ask"`) — you see exactly what's about to run and why before it happens. Orbit never classifies a shell command as "safe" or "dangerous" by its text — that judgment isn't reliable to automate, so every command gets the same approval gate regardless of what it looks like. Orbit never reads `.env` file contents, and never stores API keys, passwords, tokens, or real user data in its own memory files. Plain-question mode's `run_test_command` tool always asks for approval too — unconditionally, not just when `approvalMode` is `"ask"` — since it's the one way that mode can write a file or touch the live app at all.
 
 ## Development
 
