@@ -4,6 +4,7 @@ import path from 'node:path';
 export type ProjectMemory = {
 	overview: string | null;
 	decisions: string | null;
+	enviornment: string | null;
 	failures: string | null;
 };
 
@@ -45,6 +46,7 @@ export function readProjectMemory(projectRoot: string): ProjectMemory {
 	return {
 		overview: readMemoryFile(projectRoot, 'overview.md'),
 		decisions: readMemoryFile(projectRoot, 'decisions.md'),
+		enviornment: readMemoryFile(projectRoot, 'environment_setup.md'),
 		failures: readMemoryFile(projectRoot, 'failures.md'),
 	};
 }

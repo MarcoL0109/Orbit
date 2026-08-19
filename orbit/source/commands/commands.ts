@@ -828,7 +828,7 @@ Available Orbit commands:
 	{
 		name: 'memory',
 		description: 'Show project memory',
-		usage: '/memory [--overview] [--decisions] [--failures]',
+		usage: '/memory [--overview] [--decisions] [--env] [--failures]',
 		argsRule: {min: 0},
 		handler(_args, context) {
 			if (!context.project?.root) {
@@ -844,6 +844,7 @@ Available Orbit commands:
 			const flagToSection: Record<string, keyof MemorySections> = {
 				'--overview': 'overview',
 				'--decisions': 'decisions',
+				'--env': 'environment',
 				'--failures': 'failures',
 			};
 
@@ -868,6 +869,7 @@ Available Orbit commands:
 			const include: MemorySections = {
 				overview: noFlags || _args.includes('--overview'),
 				decisions: noFlags || _args.includes('--decisions'),
+				environment: noFlags || _args.includes('--env'),
 				failures: noFlags || _args.includes('--failures'),
 			};
 

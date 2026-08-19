@@ -75,7 +75,7 @@ Shows which routes and components still have no test at all.
 | `/scan` | Refresh the project index (routes, components, tests, config) |
 | `/coverage` | List routes/components with no matching test |
 | `/config` | Allow user to switch their Orbit settings via terminal (also supports direct file modifications) |
-| `/memory [--overview] [--decisions] [--failures]` | Show project memory — no flags shows all three sections, flags filter to just what you ask for |
+| `/memory [--overview] [--decisions] [--env] [--failures]` | Show project memory — no flags shows all three sections, flags filter to just what you ask for |
 | `/projects` | Show every project Orbit has been initialized in |
 | `/switch` | Switch Orbit to a different project |
 | `/abort` | Abort the current running task |
@@ -201,7 +201,7 @@ Orbit doesn't generate or manage this file itself — `--ci` just gives any CI s
 
 `graphify-out/` (graph.json, GRAPH_REPORT.md, etc.) is written at your project root, not inside `.orbit/`, since that's where graphify's own incremental caching expects it to live — Orbit adds it to your `.gitignore` automatically.
 
-Run `/memory` to read `overview.md`, `decisions.md`, and `failures.md` back in the terminal instead of opening them by hand — pass `--overview`, `--decisions`, and/or `--failures` to see only some of them; with no flags it shows all three.
+Run `/memory` to read `overview.md`, `decisions.md`, `environment_setup.md` and `failures.md` back in the terminal instead of opening them by hand — pass `--overview`, `--decisions`, `--env` and/or `--failures` to see only some of them; with no flags it shows all three.
 
 ### Configuration (`.orbit/config.json`)
 

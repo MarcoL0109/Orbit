@@ -190,6 +190,7 @@ function summarizeKnownClassifications(projectRoot: string): string {
 export type MemorySections = {
 	overview?: boolean;
 	decisions?: boolean;
+	environment?:boolean;
 	failures?: boolean;
 };
 
@@ -206,7 +207,9 @@ export function summarizeMemory(
 			`## Project overview\n${memory.overview}`,
 		include.decisions &&
 			memory.decisions &&
-			`## Testing decisions and conventions\n${memory.decisions}`,
+			`## Testing decisions and conventions\n${memory.decisions ? memory.decisions : "No content yet"}`,
+		include.environment &&
+			`## Environment setup Instructions\n${memory.enviornment}`,
 		include.failures &&
 			memory.failures &&
 			`## Known failure patterns\n${memory.failures}`,

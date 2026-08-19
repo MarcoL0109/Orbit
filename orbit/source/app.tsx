@@ -30,10 +30,7 @@ import {
 } from './init/deinit.js';
 import {reportError} from './commands/error.js';
 import {readOrbitConfig} from './init/config.js';
-import {
-	CONFIG_FIELDS,
-	formatConfigFieldValue,
-} from './commands/commands.js';
+import {CONFIG_FIELDS, formatConfigFieldValue} from './commands/commands.js';
 
 type AppProps = {
 	readonly initialPrompt?: string;
@@ -42,6 +39,15 @@ type AppProps = {
 export function App({initialPrompt}: AppProps) {
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [query, setQuery] = useState<string>('');
+	// Bumped whenever query is replaced programmatically (tab-completion)
+	// rather than by the user typing — remounts the query TextInput so its
+	// internal cursor offset re-initializes to the end of the new value.
+	// ink-text-input only auto-adjusts the cursor when the value got
+	// SHORTER than the cursor position; it never advances the cursor when
+	// the value grows (e.g. "te" -> "test "), which is exactly what
+	// completion does, so without this the cursor is left sitting wherever
+	// it was in the middle of the completed word.
+	const [queryInputKey, setQueryInputKey] = useState<number>(0);
 	const [isBooting, setIsBooting] = useState<boolean>(true);
 	const [isThinking, setIsThinking] = useState<boolean>(false);
 	const [isInitting, setIsInitting] = useState<boolean>(false);
@@ -101,7 +107,8 @@ export function App({initialPrompt}: AppProps) {
 			const completion = getBestCommandCompletion(query);
 
 			if (completion) {
-				setQuery(completion + ' ');
+				setQuery(completion);
+				setQueryInputKey(previous => previous + 1);
 			}
 		}
 
@@ -820,6 +827,7 @@ Global memory updated:
 				<Box marginTop={1}>
 					<Text color="cyan">{'> '}</Text>
 					<TextInput
+						key={queryInputKey}
 						value={query}
 						placeholder="Ask Orbit to test something"
 						onChange={setQuery}
