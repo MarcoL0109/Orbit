@@ -53,7 +53,7 @@ import {reportError, type ArgCountRule} from './error.js';
 // /deinit + /init. Picking a new value here only persists the choice —
 // the actual graphify build/install still only happens on the next real
 // scan, exactly as if /scan's picker had been answered this way.
-type ConfigFieldDescriptor =
+export type ConfigFieldDescriptor =
 	| {key: 'approvalMode'; label: string; kind: 'enum'; options: string[]}
 	| {key: 'writeMode'; label: string; kind: 'enum'; options: string[]}
 	| {key: 'defaultBrowser'; label: string; kind: 'enum'; options: string[]}
@@ -64,7 +64,7 @@ type ConfigFieldDescriptor =
 	| {key: 'maxRepairAttempts'; label: string; kind: 'number'}
 	| {key: 'devCommands'; label: string; kind: 'csv'};
 
-const CONFIG_FIELDS: ConfigFieldDescriptor[] = [
+export const CONFIG_FIELDS: ConfigFieldDescriptor[] = [
 	{
 		key: 'approvalMode',
 		label: 'Approval mode',
@@ -114,7 +114,7 @@ export function resolveEnvironmentSetupRoot(
 	return orbitConfig.environmentSetupRoot ?? projectRoot;
 }
 
-function formatConfigFieldValue(
+export function formatConfigFieldValue(
 	config: OrbitConfig,
 	field: ConfigFieldDescriptor,
 ): string {

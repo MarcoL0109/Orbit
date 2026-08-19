@@ -30,6 +30,10 @@ import {
 } from './init/deinit.js';
 import {reportError} from './commands/error.js';
 import {readOrbitConfig} from './init/config.js';
+import {
+	CONFIG_FIELDS,
+	formatConfigFieldValue,
+} from './commands/commands.js';
 
 type AppProps = {
 	readonly initialPrompt?: string;
@@ -747,6 +751,36 @@ Global memory updated:
 									{orbitConfig.writeMode === 'always'
 										? 'Always allow'
 										: 'Ask before writing'}
+								</Text>
+							</Text>
+							{CONFIG_FIELDS.filter(
+								field =>
+									field.key !== 'approvalMode' && field.key !== 'writeMode',
+							).map(field => (
+								<Text key={field.key}>
+									{field.label}:{' '}
+									<Text color="cyan">
+										{formatConfigFieldValue(orbitConfig, field)}
+									</Text>
+								</Text>
+							))}
+							<Text>
+								Test dir: <Text color="cyan">{orbitConfig.testDir}</Text>
+							</Text>
+							<Text>
+								Manual test dir:{' '}
+								<Text color="cyan">{orbitConfig.manualTestDir}</Text>
+							</Text>
+							<Text>
+								Docker compose file:{' '}
+								<Text color="cyan">
+									{orbitConfig.dockerComposeFile ?? '(none)'}
+								</Text>
+							</Text>
+							<Text>
+								Docker compose healthchecks:{' '}
+								<Text color="cyan">
+									{orbitConfig.dockerComposeHasHealthchecks ? 'yes' : 'no'}
 								</Text>
 							</Text>
 						</>
