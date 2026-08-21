@@ -7,6 +7,24 @@ export type BrowserWorkerCommand =
 	| {action: 'navigate'; url: string}
 	| {action: 'click'; selector: string}
 	| {action: 'fill'; selector: string; value: string}
+	// label, not value — selects a native <select>'s option by its visible
+	// text. Matches how the model actually perceives options (it only ever
+	// sees rendered labels via the accessibility snapshot, never the raw
+	// value attribute, which can be arbitrary — confirmed live against a
+	// real project where a native select's own value attribute was a
+	// literal escaped-quoted string, nothing a model should have to guess).
+	| {action: 'selectOption'; selector: string; label: string}
+	// selector: null sends the key to the page globally (e.g. Escape to
+	// close a modal with nothing specific focused); non-null presses it on
+	// that one focused element (e.g. Enter after filling an autocomplete).
+	| {action: 'press'; selector: string | null; key: string}
+	| {action: 'hover'; selector: string}
+	// Explicit wait for one element's state, separate from actAndReport's
+	// own blanket settle() — that one's a generic, bounded-time nudge after
+	// every action; this is for when the model specifically doesn't trust
+	// that was enough and wants to wait for one particular element instead
+	// of proceeding blind.
+	| {action: 'wait'; selector: string; state: 'visible' | 'hidden'}
 	| {action: 'snapshot'}
 	| {action: 'reset'}
 	| {action: 'close'};
@@ -259,6 +277,20 @@ async function handle(command) {
       return actAndReport((p) => p.locator(command.selector).click());
     case 'fill':
       return actAndReport((p) => p.locator(command.selector).fill(command.value));
+    case 'selectOption':
+      return actAndReport((p) => p.locator(command.selector).selectOption({label: command.label}));
+    case 'press':
+      return actAndReport((p) =>
+        command.selector
+          ? p.locator(command.selector).press(command.key)
+          : p.keyboard.press(command.key)
+      );
+    case 'hover':
+      return actAndReport((p) => p.locator(command.selector).hover());
+    case 'wait':
+      return actAndReport((p) =>
+        p.locator(command.selector).waitFor({state: command.state, timeout: 10000})
+      );
     case 'snapshot': {
       const p = await ensurePage();
       const snapshot = await snapshotOf(p);

@@ -79,6 +79,39 @@ export function writeEnvironmentSetupInstructions(
 	);
 }
 
+// Called by report_result when a feature ends 'failed' or 'gave_up' — the
+// one thing failures.md was scaffolded for at /init but, until now, nothing
+// ever wrote back to (see readProjectMemory's comment above). Entries are
+// prepended, not appended: readMemoryFile's MAX_MEMORY_CHARS cap reads from
+// the START of the file, so newest-first is what keeps recent failures
+// inside that window as this file grows, rather than the oldest entries
+// squatting there forever. Writes rootCause, not summary — report_result
+// requires rootCause to be a specific, evidence-backed diagnosis (checked
+// in reportResult.ts) rather than a vague recap, since a vague note here is
+// exactly as useless to a future run as no note at all. Never raw logs or
+// stack traces either way, matching this file's own placeholder guidance
+// ("Do not store ... full raw logs").
+export function recordFailureNote(
+	projectRoot: string,
+	entry: {feature: string; status: 'failed' | 'gave_up'; rootCause: string},
+): void {
+	const dir = getMemoryDir(projectRoot);
+	fs.mkdirSync(dir, {recursive: true});
+	const filePath = path.join(dir, 'failures.md');
+
+	const existing = fs.existsSync(filePath)
+		? fs.readFileSync(filePath, 'utf8').trim()
+		: '';
+	const date = new Date().toISOString().slice(0, 10);
+	const note = `- **${date}** — "${entry.feature}" (${entry.status}): ${entry.rootCause}`;
+
+	fs.writeFileSync(
+		filePath,
+		existing ? `${note}\n${existing}\n` : `${note}\n`,
+		'utf8',
+	);
+}
+
 // Called when a run that followed documented instructions still failed
 // (gave up, or signaled ready but the app never became reachable) — that's
 // strong evidence the recipe is stale (a changed port, a new required step,

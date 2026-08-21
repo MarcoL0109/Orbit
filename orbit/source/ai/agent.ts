@@ -163,6 +163,124 @@ function collectTestsWrittenThisRun(
 	return [...files];
 }
 
+type VerifiedBrowserAction =
+	| {
+			action: 'click' | 'selectOption' | 'hover';
+			selector: string;
+			value: string | null;
+	  }
+	| {action: 'fill'; selector: string; value: string | null}
+	| {action: 'press'; selector: string | null; key: string}
+	| {action: 'wait'; selector: string; state: 'visible' | 'hidden'};
+
+// Pulled straight from this run's own browser_action call log — the exact
+// selector strings already confirmed to work against the real, live page,
+// not a description of them. write_test_file takes free-form content the
+// model composes itself; nothing forces it to reuse a selector it already
+// verified rather than reconstructing a similar-looking one from memory of
+// general Playwright/framework conventions, and those two don't always
+// match (a selector that resolved uniquely in the exact moment it was
+// clicked live isn't guaranteed to be the one the model recalls when
+// writing the file afterward). Surfacing the verified list explicitly, every
+// turn, is what actually closes that gap — see buildSystemPrompt below.
+// click/fill/selectOption/press/hover/wait only: navigate/snapshot/reset
+// have no selector (or key/state) worth reusing.
+function collectVerifiedSelectorsThisRun(
+	steps: AgentStep[],
+): VerifiedBrowserAction[] {
+	const verified: VerifiedBrowserAction[] = [];
+
+	for (let index = 0; index < steps.length - 1; index++) {
+		const call = steps[index];
+		const result = steps[index + 1];
+
+		if (
+			call?.type !== 'tool_call' ||
+			call.name !== 'browser_action' ||
+			result?.type !== 'tool_result' ||
+			result.name !== 'browser_action' ||
+			!result.result.ok
+		) {
+			continue;
+		}
+
+		const args = call.args as {
+			action?: string;
+			selector?: string | null;
+			value?: string | null;
+			key?: string | null;
+		};
+
+		if (
+			(args.action === 'click' ||
+				args.action === 'selectOption' ||
+				args.action === 'hover') &&
+			args.selector
+		) {
+			verified.push({
+				action: args.action,
+				selector: args.selector,
+				value: args.value ?? null,
+			});
+		} else if (args.action === 'fill' && args.selector) {
+			verified.push({
+				action: 'fill',
+				selector: args.selector,
+				value: args.value ?? null,
+			});
+		} else if (args.action === 'press' && args.key) {
+			verified.push({
+				action: 'press',
+				selector: args.selector ?? null,
+				key: args.key,
+			});
+		} else if (
+			args.action === 'wait' &&
+			args.selector &&
+			(args.value === 'visible' || args.value === 'hidden')
+		) {
+			verified.push({
+				action: 'wait',
+				selector: args.selector,
+				state: args.value,
+			});
+		}
+	}
+
+	return verified;
+}
+
+function summarizeVerifiedSelectors(steps: AgentStep[]): string {
+	const verified = collectVerifiedSelectorsThisRun(steps);
+
+	if (verified.length === 0) {
+		return 'None yet this run.';
+	}
+
+	return verified
+		.map(entry => {
+			switch (entry.action) {
+				case 'click':
+					return `- click: ${entry.selector}`;
+				case 'hover':
+					return `- hover: ${entry.selector}`;
+				case 'fill':
+					return `- fill: ${entry.selector} = ${JSON.stringify(entry.value)}`;
+				case 'selectOption':
+					return `- selectOption: ${entry.selector} = ${JSON.stringify(
+						entry.value,
+					)}`;
+				case 'press':
+					return entry.selector
+						? `- press: "${entry.key}" on ${entry.selector}`
+						: `- press: "${entry.key}" (global, no element focused)`;
+				case 'wait':
+					return `- wait: ${entry.selector} until ${entry.state}`;
+			}
+		})
+		.join('\n');
+}
+
 // Reuses whatever /scan already computed instead of leaving the model to
 // guess file paths blind — read_file still exists for the actual deep dive
 // once it knows which file is relevant. extraTestFiles covers the one gap
@@ -262,7 +380,7 @@ function summarizeKnownClassifications(projectRoot: string): string {
 export type MemorySections = {
 	overview?: boolean;
 	decisions?: boolean;
-	environment?:boolean;
+	environment?: boolean;
 	failures?: boolean;
 };
 
@@ -299,6 +417,7 @@ function buildSystemPrompt(
 	knownClassifications: string,
 	testsWrittenThisRun: string[],
 	hasExplainSymbol: boolean,
+	steps: AgentStep[],
 ): string {
 	return `You are Orbit, an AI QA agent for E2E testing.
 
@@ -334,6 +453,15 @@ Exploring with a real browser (browser_action): the app runs at ${
 		context.orbitConfig.baseUrl
 	} — navigate accepts a path relative to that (e.g. "/SignUp") or a full URL. read_file shows you source code, not what actually renders — runtime data, conditional branches, and component-library internals can all make the real page different from what the source suggests. Use browser_action to ground your selectors and expected outcomes in what you actually observe, especially for anything read_file can't tell you: content behind a login, a multi-step flow with no direct URL per step, or a state that only appears after an interaction (a toast, a modal, a cart badge). navigate/click/fill already return the resulting accessibility snapshot whenever the page actually changed — you don't need to separately call snapshot after them. Call snapshot on its own only to re-check the current state without taking a new action. Call reset when you start exploring a NEW feature (fresh cookies/storage) — do not call it between pages within the same feature's flow, since a multi-page journey (e.g. cart -> checkout -> payment) depends on staying in the same browser context throughout. A sequence where a later step only makes sense because of what an earlier step just did — reset a password, then verify you can log in with that new password; sign up, then check the account shows as unactivated — is ONE feature, not two, even if the prompt describes it as a list of things to do in order. Only reset when moving to something genuinely independent of what you just verified, not for every checkpoint within one continuous journey. Keep in mind browser_action shows you what actually happens, not what's supposed to happen — if what you observe contradicts the feature description you were given or a documented convention in project memory, treat that as a possible application bug rather than writing an assertion that simply matches the broken behavior.
 
+Selectors already confirmed to work this run, from your own successful browser_action click/fill calls against the real live page:
+${summarizeVerifiedSelectors(steps)}
+
+When you write_test_file, reuse these exact strings for anything they cover — do not re-derive a similar-looking selector from memory or from a general convention of how this kind of element "usually" works. A selector you already confirmed resolves uniquely on the real page is more trustworthy than one you reconstruct afterward, and the two are not guaranteed to match — reconstructing from memory instead of reusing what you verified is exactly how a past run wrote a selector that hung forever even though the equivalent live click had worked moments earlier. If a step in the test isn't covered by anything in this list, that means you wrote or ran the test without verifying that step live first — go back and verify it with browser_action before writing it, rather than guessing.
+
+A live "press" that worked can still be a no-op once written down — verify with wait, not just latency. Pressing Enter to confirm a highlighted autocomplete/dropdown suggestion only works once that suggestion has actually finished loading and become the active one; during YOUR OWN exploration there's real time between one browser_action call and the next (each one's own settle, plus your own reasoning time), which is often enough for that to happen without you noticing it was timing-dependent at all. A written test has none of that gap — click() and press('Enter') run back-to-back with nothing in between — so a press that looked instant and reliable while you were exploring can silently select nothing once it's replayed at full speed. Confirmed live: a past run's exploration genuinely selected a customer this way and the resulting record really saved; the written test copied the identical click-then-press sequence and Enter fired before anything was highlighted, so the field stayed empty, a required-field validation silently blocked the save, and the test hung waiting for a network response that was never going to come. Before writing (or, better, before even relying on) a bare press('Enter') to confirm a selection — in exploration or in the file you write — use wait to confirm an option is actually visible/ready first, and write that same wait into the test file immediately before the press, not just the press by itself.
+
+Proving persistence, not just a clean-looking form: when a feature creates, saves, submits, or otherwise persists something, the test's FINAL assertion must prove the change actually persisted on the server — not just that the form looks fine at that instant. A save/submit click triggers an async request; the moment right after clicking it is still the PRE-save state on screen. If every assertion the test makes would already be true before that request finishes, Playwright can tear the browser context down as soon as the test function returns — which can cut the save request off before it ever completes, so the test passes without the record ever actually being created. Bad: asserting no validation-error text is shown, or that a value you just typed is still visible in the form — both are already true before the save request resolves, proving nothing. Good: assert on something that only becomes true AFTER persistence completes — a generated reference/ID appearing (e.g. matching /ORDER-\d+/ or whatever this app's real pattern is), the URL or breadcrumb changing away from a "new"/"create" state, or an explicit page.waitForResponse(...) matching the real save request you already saw succeed via browser_action's apiCalls during exploration, awaited before any further assertions. If you never actually watched a real save succeed during exploration — checked its apiCalls entry, not just that the DOM looked fine afterward — go verify that live first rather than guessing what the success signal looks like.
+
 Rules:
 - Prefer Playwright and role-based selectors (getByRole, getByLabel, getByText).
 - Use read_file to look at the actual markup of a component or route before writing selectors against it — do not guess. Use browser_action when you need to see what's actually rendered, not just what the source suggests.
@@ -351,6 +479,8 @@ Rules:
 - Do NOT call write_test_file or run_test for any feature where you used request_user_input, whether the user provided the value or declined. There is no safe automated version of this: a persisted test can never obtain a fresh one-time value on a future run, so it would either fail deterministically every time (nothing to fill it with) or — worse — replaying the steps to reach that point again repeats whatever real side effect they have (e.g. clicking "send code" really does send another real email, every single time the test runs, forever). Verify the flow live with browser_action only, then call report_result directly for that feature with file: null, status reflecting what you actually observed, requiresManualInput: true, and manualStepOutcome set to whether the manually-assisted step itself worked. State in the summary that no automated test was written and why.
 - Every result you give report_result needs a confidence: 'certain' or 'uncertain'. Mark 'uncertain' when you genuinely cannot tell whether an outcome is actually correct — you already have a way to check this decisively for anything involving browser_action (its apiCalls/consoleErrors fields), so 'uncertain' is specifically for what's left after checking those: a live interaction Playwright may not simulate reliably (drag-and-drop, complex gestures), or behavior with no network/console evidence pointing either way. Do not mark everything 'certain' by default to avoid the extra step — that defeats the entire point of the field.
 - If you mark a result 'uncertain', call confirm_outcome for that exact feature BEFORE calling report_result — show the user what you actually did and the real evidence (not your interpretation of it), and use their answer as that feature's actual status. report_result will reject an 'uncertain' result it hasn't already gotten a matching confirm_outcome call for; the feature name you pass to confirm_outcome must exactly match the one you then use in report_result.
+- Every result reported as 'failed' or 'gave_up' needs a rootCause: the specific reason it failed, not a restatement of the summary. "Timed out while saving" is not a root cause; "getByRole('combobox').click() was intercepted by its own already-open dropdown" is. If you genuinely don't know why it failed, look again — reread run_test's error/stackTrace, or take a fresh browser_action snapshot — before calling report_result, rather than guessing. report_result rejects a failed/gave_up result with no rootCause. This gets written to project memory for the next run against this project to read, so a vague rootCause is exactly as useless to that future run as none at all.
+- Every result also needs explorationResult/explorationReason and backendResult/backendReason — a breakdown of where the pipeline actually stood, since any one of live exploration, the real backend request, and the written Playwright test can be the actual point of failure while the others are fine, and an overall status/rootCause alone doesn't say which. explorationResult is about whether YOU, live with browser_action, actually got the flow to work — not whether the written test passed. backendResult is specifically about the real server response for whatever this feature creates/saves/submits: mark 'confirmed-success' ONLY if you actually checked the real response (browser_action's apiCalls, or an explicit network wait in the test) and it succeeded — never mark it 'confirmed-success' just because the UI looked fine afterward, since the UI can look fine before an async save has even finished. Mark 'unverified' rather than guessing if you never actually checked. Each needs its own one-line reason distinct from summary/rootCause — report_result rejects a result with either reason missing or blank.
 - Call report_result exactly once, when you are completely done with every feature, with one result entry per feature. Do not stop without calling it.`;
 }
 
@@ -479,6 +609,7 @@ export async function runTestingAgent(
 					knownClassifications,
 					testsWrittenThisRun,
 					activeToolRegistry !== toolRegistry,
+					steps,
 				),
 				input: nextInput,
 				previousResponseId,
@@ -528,10 +659,30 @@ export async function runTestingAgent(
 			);
 			if (reportCall && reportCall.result.ok) {
 				const data = reportCall.result.data as ReportResultArgs;
+				// playwrightStage is the one stage never trusted to the model's
+				// own self-report (unlike explorationResult/backendResult) — it's
+				// derived here from run_test's own structured result, the same
+				// file-keyed lookup formatAgentRunResult/agentRunResultToJson
+				// already use to correlate a feature with its actual test run.
+				const runResultsByFile = collectRunResultsByFile(steps);
+				const results: FeatureResult[] = data.results.map(result => {
+					const run = result.file
+						? runResultsByFile.get(result.file)
+						: undefined;
+					return {
+						...result,
+						playwrightStage: run
+							? run.result.passed
+								? 'passed'
+								: 'failed'
+							: 'not-run',
+					};
+				});
+
 				return {
-					status: deriveOverallStatus(data.results),
-					summary: summarizeFeatureResults(data.results),
-					results: data.results,
+					status: deriveOverallStatus(results),
+					summary: summarizeFeatureResults(results),
+					results,
 					steps,
 				};
 			}
@@ -593,6 +744,25 @@ const FEATURE_STATUS_ICON: Record<FeatureResult['status'], string> = {
 	gave_up: '?',
 };
 
+const EXPLORATION_ICON: Record<FeatureResult['explorationResult'], string> = {
+	passed: '✓',
+	failed: '✗',
+	'not-attempted': '?',
+};
+
+const BACKEND_ICON: Record<FeatureResult['backendResult'], string> = {
+	'confirmed-success': '✓',
+	'confirmed-failure': '✗',
+	unverified: '?',
+};
+
+const PLAYWRIGHT_STAGE_ICON: Record<FeatureResult['playwrightStage'], string> =
+	{
+		passed: '✓',
+		failed: '✗',
+		'not-run': '?',
+	};
+
 // Keyed by file rather than kept as a single "last result" — repeated
 // run_test calls scoped to the SAME file (repair iterations) correctly
 // overwrite each other here, but calls for DIFFERENT files each keep their
@@ -651,9 +821,20 @@ export function formatAgentRunResult(result: AgentRunResult): string {
 			  } — not unattended-repeatable]`
 			: '';
 
+		const stageLines = `    Browser exploration:  ${
+			EXPLORATION_ICON[feature.explorationResult]
+		} ${feature.explorationResult} — ${feature.explorationReason}
+    Backend (API):         ${BACKEND_ICON[feature.backendResult]} ${
+			feature.backendResult
+		} — ${feature.backendReason}
+    Playwright test:       ${PLAYWRIGHT_STAGE_ICON[feature.playwrightStage]} ${
+			feature.playwrightStage
+		}`;
+
 		return `${FEATURE_STATUS_ICON[feature.status]} ${feature.feature} (${
 			feature.file ?? 'no test file'
 		})${manualTag} — ${testsText}${attemptsText}
+${stageLines}
     ${feature.summary}${testListText}`;
 	});
 
@@ -670,6 +851,12 @@ export type AgentRunResultJson = {
 		file: string | null;
 		status: FeatureResult['status'];
 		summary: string;
+		rootCause: string | null;
+		explorationResult: FeatureResult['explorationResult'];
+		explorationReason: string;
+		backendResult: FeatureResult['backendResult'];
+		backendReason: string;
+		playwrightStage: FeatureResult['playwrightStage'];
 		requiresManualInput: boolean;
 		manualStepOutcome: 'succeeded' | 'failed' | null;
 		// Null when the feature has no correlated run_test call at all — a
@@ -706,6 +893,12 @@ export function agentRunResultToJson(
 				file: feature.file,
 				status: feature.status,
 				summary: feature.summary,
+				rootCause: feature.rootCause,
+				explorationResult: feature.explorationResult,
+				explorationReason: feature.explorationReason,
+				backendResult: feature.backendResult,
+				backendReason: feature.backendReason,
+				playwrightStage: feature.playwrightStage,
 				requiresManualInput: feature.requiresManualInput,
 				manualStepOutcome: feature.manualStepOutcome,
 				tests: run
