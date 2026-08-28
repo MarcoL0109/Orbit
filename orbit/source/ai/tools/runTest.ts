@@ -12,6 +12,15 @@ export type TestFailureDetail = {
 	screenshotPath?: string;
 	tracePath?: string;
 	videoPath?: string;
+	// Playwright's own error-context.md attachment (lib/errorContext.js) —
+	// specifically the accessibility-tree snapshot of the page at the
+	// exact moment of failure, the one part of that file that's genuinely
+	// new information for the model. errorMessage above already covers
+	// what Playwright's "Error details" section says, and the model
+	// already knows its own test source — the page snapshot is the only
+	// piece it has no other way to see, and it's exactly what a human
+	// would open the file to check first.
+	pageSnapshotAtFailure?: string;
 };
 
 export type TestStatus = 'passed' | 'failed' | 'timedOut' | 'skipped' | 'other';
@@ -147,6 +156,60 @@ function collectAllTests(
 	}
 }
 
+// Generous on purpose, and higher than it looks like it should need to be:
+// measured against a real failure against a complex enterprise app (Odoo),
+// the section this pulls from ran 15.6k chars, with the actually-useful
+// evidence (the specific empty/mismatched element) sitting past the 8k
+// mark, not near the front. This only ever fires on a test FAILURE, not on
+// every call the way per-action capture elsewhere in this codebase does —
+// getting the diagnosis right is worth more context here than the routine
+// caps (2-4k chars) used for things that fire constantly.
+const MAX_PAGE_SNAPSHOT_CHARS = 20_000;
+
+// error-context.md's own fixed section order (Instructions, Test info,
+// Error details, Page snapshot, Test source) — Instructions is Playwright's
+// own prompt for whatever AI reads the file directly, redundant with this
+// agent's own system prompt; Test info/Error details duplicate fields
+// already on TestFailureDetail; Test source is the model's own code, which
+// it already has. Only the snapshot itself is pulled out.
+function extractPageSnapshotSection(
+	errorContextMarkdown: string,
+): string | undefined {
+	const sectionStart = errorContextMarkdown.indexOf('# Page snapshot');
+	if (sectionStart === -1) return undefined;
+
+	const nextSectionStart = errorContextMarkdown.indexOf(
+		'\n# ',
+		sectionStart + 1,
+	);
+	const section = (
+		nextSectionStart === -1
+			? errorContextMarkdown.slice(sectionStart)
+			: errorContextMarkdown.slice(sectionStart, nextSectionStart)
+	).trim();
+
+	return section.length > MAX_PAGE_SNAPSHOT_CHARS
+		? section.slice(0, MAX_PAGE_SNAPSHOT_CHARS) + '\n... [truncated]'
+		: section;
+}
+
+function readPageSnapshotAtFailure(
+	errorContextPath: string | undefined,
+): string | undefined {
+	if (!errorContextPath) return undefined;
+
+	try {
+		return extractPageSnapshotSection(
+			fs.readFileSync(errorContextPath, 'utf8'),
+		);
+	} catch {
+		// Best-effort — a missing/unreadable file just means this failure
+		// reports without it, same as any attachment that never got
+		// written (e.g. a crash before Playwright could capture one).
+		return undefined;
+	}
+}
+
 function collectFailures(
 	suites: JsonReportSuite[],
 	failures: TestFailureDetail[],
@@ -162,6 +225,9 @@ function collectFailures(
 
 				const errorEntry = lastResult.errors?.[0] ?? lastResult.error;
 				const attachments = lastResult.attachments ?? [];
+				const errorContextPath = attachments.find(
+					a => a.name === 'error-context',
+				)?.path;
 
 				failures.push({
 					testTitle: spec.title ?? 'Untitled test',
@@ -170,6 +236,7 @@ function collectFailures(
 					screenshotPath: attachments.find(a => a.name === 'screenshot')?.path,
 					tracePath: attachments.find(a => a.name === 'trace')?.path,
 					videoPath: attachments.find(a => a.name === 'video')?.path,
+					pageSnapshotAtFailure: readPageSnapshotAtFailure(errorContextPath),
 				});
 			}
 		}
@@ -217,7 +284,7 @@ type RunTestArgs = {
 export const runTestTool: ToolDefinition<RunTestArgs, RunTestResult> = {
 	name: 'run_test',
 	description:
-		'Run the Playwright test suite, optionally scoped to a single file. Returns structured pass/fail results with per-test failure details (error message, stack trace, and paths to a screenshot/trace/video if captured).',
+		"Run the Playwright test suite, optionally scoped to a single file. Returns structured pass/fail results with per-test failure details (error message, stack trace, and paths to a screenshot/trace/video if captured). A failure's pageSnapshotAtFailure, when present, is the real accessibility-tree snapshot of the page at the exact moment it failed — read it before writing rootCause or attempting a repair. It routinely shows the actual reason a locator never resolved (the element genuinely isn't there, a different element occupies that role/name, a dropdown never populated) that the bare error message and stack trace can't tell you on their own — a bare 'Test timeout of 90000ms exceeded' looks the same whether the page never loaded, the wrong selector was used, or the right selector needed something else (typed text, a wait) to ever appear. Do not guess which one it was; check the snapshot.",
 	parameters: {
 		type: 'object',
 		properties: {

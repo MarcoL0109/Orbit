@@ -9,7 +9,11 @@ import {
 	getProjectDisplayName,
 } from './projects/search.js';
 import {validateProjectPath} from './projects/path.js';
-import {rememberProject, readGlobalProjects} from './registry/knownProjects.js';
+import {
+	rememberProject,
+	readGlobalProjects,
+	removeKnownProject as removeGlobalProject,
+} from './registry/knownProjects.js';
 import {initOrbitProject} from './init/init.js';
 import type {InitFileAction} from './init/init.js';
 import {deriveBlindProjectName} from './init/blindInit.js';
@@ -49,6 +53,22 @@ import {
 } from './commands/commands.js';
 import {generateRecommendedPrompt} from './ai/recommendPrompt.js';
 import {theme} from './ui/theme.js';
+
+// Matches one stage line from formatAgentRunResult's own fixed output
+// shape (agent.ts) — "    Browser exploration:  X status — reason", where
+// X is the ✓/✗/? icon that function already assigns per stage. Only ever
+// applied to our own generated report text, never to model-authored
+// content, so pattern-matching a known, code-controlled format is safe
+// here in a way it wouldn't be against free-form text.
+const STAGE_LINE_PATTERN =
+	/^ {4}(?:Browser exploration|Backend \(API\)|Playwright test):\s+([✓✗?])\s/;
+
+function colorForStageIcon(icon: string): string | undefined {
+	if (icon === '✓') return theme.success;
+	if (icon === '✗') return theme.danger;
+	if (icon === '?') return theme.warning;
+	return undefined;
+}
 
 // Every pendingX/checkX prompt below renders through this so a decision
 // prompt looks the same regardless of which one is asking — border color is
@@ -357,6 +377,17 @@ export function App({initialPrompt}: AppProps) {
 		}
 
 		if (item.value === 'add' || item.value === 'blind') {
+			// Must actually unmount the picker's SelectInput here, not just
+			// stop rendering its own text — Ink delivers a keystroke to
+			// every currently-active useInput hook, not just whichever
+			// component looks focused. Leaving selectProjectMode true left
+			// this SelectInput mounted (and still listening) underneath the
+			// TextInput that renders next, so a digit typed into a
+			// URL/path — meant for that TextInput — was ALSO landing on
+			// SelectInput's own built-in "press 1-9 to jump-select" feature
+			// and instantly picking whatever item sat at that position in
+			// the very same list, including "Quit Orbit".
+			setSelectProjectMode(false);
 			setSelectedProjectOption(item.value);
 			return;
 		}
@@ -373,6 +404,57 @@ export function App({initialPrompt}: AppProps) {
 					role: 'system',
 					content: `Could not find a tracked project named "${item.value}".`,
 					color: 'red',
+				},
+			]);
+			setSelectProjectMode(false);
+			setSelectedProjectOption('');
+			return;
+		}
+
+		// A blind project's storage path has no real codebase to detect —
+		// detectProjectRoot would still find it (its own orbit/ folder is a
+		// recognized marker), but the ProjectInfo it returns has no blind/
+		// targetUrl fields at all, so setting project to that result would
+		// silently reactivate read_file/explain_symbol/scan for a workspace
+		// that structurally shouldn't have them. Build the ProjectInfo
+		// directly from the registry entry instead, the same way
+		// startBlindProjectFlow already does for a known blind URL.
+		if (matched.blind) {
+			// Same staleness check startBlindProjectFlow does for a typed
+			// URL — the registry remembering this doesn't guarantee the
+			// workspace is still on disk (it can be deleted by hand, same
+			// as any folder). Trusting it here would switch to a dead path
+			// that immediately fails "not initialized" on the next /test.
+			if (readOrbitConfig(matched.path) === null) {
+				removeGlobalProject(matched.path);
+				setMessages(previous => [
+					...previous,
+					{
+						role: 'system',
+						content: `"${matched.name}" (${matched.path}) no longer exists on disk — removed from tracked projects. Use "Set Up Blind Project" with its URL to set up a fresh one.`,
+						color: 'yellow',
+					},
+				]);
+				setSelectProjectMode(false);
+				setSelectedProjectOption('');
+				return;
+			}
+
+			setProject({
+				isProject: true,
+				root: matched.path,
+				confidence: 100,
+				markers: [],
+				hasOrbitFolder: true,
+				blind: true,
+				targetUrl: matched.targetUrl,
+			});
+			setMessages(previous => [
+				...previous,
+				{
+					role: 'system',
+					content: `Switched to blind project: ${matched.name}`,
+					color: 'green',
 				},
 			]);
 			setSelectProjectMode(false);
@@ -1119,22 +1201,50 @@ Global memory updated:
 							? '[orbit] '
 							: null;
 					const tagColor = message.role === 'user' ? theme.user : theme.accent;
+					const lines = message.content.split('\n');
 
 					return (
-						<Box key={index} marginTop={index === 0 ? 0 : 1}>
-							<Text color={message.color} dimColor={message.dim}>
-								{tag && (
+						<Box
+							key={index}
+							marginTop={index === 0 ? 0 : 1}
+							flexDirection="column"
+						>
+							{lines.map((line, lineIndex) => {
+								// A stage line (formatAgentRunResult's own fixed
+								// output shape — "    Browser exploration:  X
+								// status — reason") carries its own pass/fail,
+								// independent of the feature or run it belongs
+								// to. A run with one passing and one failing
+								// feature — or a failing feature whose browser
+								// exploration itself succeeded — shouldn't paint
+								// every line the same color; only the stage
+								// that actually failed should read as failed.
+								const stageMatch = STAGE_LINE_PATTERN.exec(line);
+								const stageColor = stageMatch
+									? colorForStageIcon(stageMatch[2]!)
+									: undefined;
+								const lineColor = stageColor ?? message.color;
+
+								return (
 									<Text
-										bold
-										color={
-											message.color ?? (message.dim ? undefined : tagColor)
-										}
+										key={lineIndex}
+										color={lineColor}
+										dimColor={message.dim}
 									>
-										{tag}
+										{lineIndex === 0 && tag && (
+											<Text
+												bold
+												color={
+													message.color ?? (message.dim ? undefined : tagColor)
+												}
+											>
+												{tag}
+											</Text>
+										)}
+										{line}
 									</Text>
-								)}
-								{message.content}
-							</Text>
+								);
+							})}
 						</Box>
 					);
 				})}
@@ -1143,6 +1253,8 @@ Global memory updated:
 			{!(
 				isBooting ||
 				selectProjectMode ||
+				selectedProjectOption === 'add' ||
+				selectedProjectOption === 'blind' ||
 				confirmDeinit ||
 				checkName ||
 				checkInitPath ||

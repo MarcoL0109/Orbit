@@ -3,6 +3,7 @@ import {
 	readGlobalProjects,
 	formatProjectsForTui,
 	findBlindProjectByUrl,
+	removeKnownProject,
 } from '../registry/knownProjects.js';
 import {
 	getProjectDisplayName,
@@ -215,7 +216,25 @@ export async function startBlindProjectFlow(
 
 	const existing = findBlindProjectByUrl(targetUrl);
 
-	if (existing) {
+	// The registry remembering this URL doesn't guarantee the workspace is
+	// still there — it can be deleted by hand outside any Orbit command,
+	// same as any other folder. readOrbitConfig is the same check
+	// runTestCommand itself uses to decide "initialized or not"; trusting
+	// a stale entry here would just switch to a dead path and immediately
+	// fail with "not initialized" on the very next /test. Clean it up and
+	// fall through to the normal unknown-URL flow instead, so this URL
+	// gets set up fresh, exactly as if it had never been seen before.
+	if (existing && readOrbitConfig(existing.path) === null) {
+		removeKnownProject(existing.path);
+		context.setMessages(previous => [
+			...previous,
+			{
+				role: 'system',
+				content: `The workspace Orbit remembered for ${targetUrl} (${existing.path}) no longer exists on disk — setting up a fresh one.`,
+				color: 'yellow',
+			},
+		]);
+	} else if (existing) {
 		context.setProject({
 			isProject: true,
 			root: existing.path,
@@ -645,17 +664,29 @@ Available Orbit commands:
 
 				if (chosenKey === '__blind__') {
 					if (configThisIteration.blind) {
+						const confirmed = await context.requestSelect(
+							'Turn blind mode off? This switches away from the current blind project.',
+							[
+								{label: 'Confirm', value: 'confirm'},
+								{label: 'Cancel', value: 'cancel'},
+							],
+						);
+
+						if (confirmed !== 'confirm') {
+							continue;
+						}
+
 						// A real on/off toggle, not a detour through the
 						// project picker — "off" can't mean "this workspace
-						// is now a normal project" (there's no source for it
-						// to reveal), so it means leaving it: back to
-						// whatever project was active right before this one
-						// was entered (rememberProjectBeforeBlind, called
-						// from startBlindProjectFlow), or "no project
-						// selected" if there wasn't one. The blind workspace
-						// itself is untouched on disk either way; /switch
-						// (or /config -> Blind mode again) can return to it
-						// by name later.
+						// is now a normal project" (there's no source for
+						// it to reveal), so it means leaving it: back to
+						// whatever project was active right before this
+						// one was entered (rememberProjectBeforeBlind,
+						// called from startBlindProjectFlow), or "no
+						// project selected" if there wasn't one. The blind
+						// workspace itself is untouched on disk either way;
+						// /switch (or /config -> Blind mode again) can
+						// return to it by name later.
 						context.restorePreviousProject();
 						context.setMessages(previous => [
 							...previous,
