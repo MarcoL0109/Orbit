@@ -145,6 +145,7 @@ export function App({initialPrompt}: AppProps) {
 	);
 	const currentAbortControllerRef = useRef<AbortController | null>(null);
 	const readyEnvironmentsRef = useRef<Set<string>>(new Set());
+	const previousProjectBeforeBlindRef = useRef<ProjectInfo | null>(null);
 	const recommendedPromptRequestRef = useRef<number>(0);
 	// Mirrors `messages` for refreshRecommendedPrompt, which runs after an
 	// awaited command/ask flow finishes — by then `messages` itself (a
@@ -164,6 +165,17 @@ export function App({initialPrompt}: AppProps) {
 
 	function markEnvironmentReady(projectRoot: string): void {
 		readyEnvironmentsRef.current.add(projectRoot);
+	}
+
+	// project is read here, not passed in — this always runs from inside a
+	// freshly-built CommandContext (see buildCommandContext), so it closes
+	// over whatever's actually active at the moment blind mode is entered.
+	function rememberProjectBeforeBlind(): void {
+		previousProjectBeforeBlindRef.current = project;
+	}
+
+	function restorePreviousProject(): void {
+		setProject(previousProjectBeforeBlindRef.current);
 	}
 
 	function refreshRecommendedPrompt(projectRoot: string): void {
@@ -484,6 +496,8 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 			setAgentActivity,
 			isEnvironmentReady,
 			markEnvironmentReady,
+			rememberProjectBeforeBlind,
+			restorePreviousProject,
 		};
 	}
 
@@ -915,7 +929,7 @@ Global memory updated:
 		<Box flexDirection="column">
 			<Box
 				borderStyle="round"
-				borderColor={theme.accent}
+				borderColor={project?.blind ? theme.user : theme.accent}
 				paddingX={1}
 				flexDirection="column"
 			>
@@ -923,7 +937,7 @@ Global memory updated:
 					<Text bold color={theme.accent}>
 						🪐 Orbit
 					</Text>
-					<Text color={theme.accent}>
+					<Text color={project?.blind ? theme.user : theme.accent}>
 						{project?.blind ? '⊘ Blind' : '⊙ Interactive'}
 					</Text>
 				</Box>
@@ -946,7 +960,7 @@ Global memory updated:
 								<Box width={24}>
 									<Text dimColor>Mode</Text>
 								</Box>
-								<Text color={theme.accent}>⊘ Blind — no local source</Text>
+								<Text color={theme.user}>⊘ Blind — no local source</Text>
 							</Box>
 							<Box>
 								<Box width={24}>

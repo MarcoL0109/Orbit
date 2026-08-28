@@ -607,10 +607,20 @@ export async function runTestingAgent(
 	// verification by reading its own previously-generated test specs
 	// directly instead of re-confirming a selector via browser_action
 	// first, which is exactly the gap the verified-selector discipline
-	// elsewhere in this file exists to close. explain_symbol needs no
-	// equivalent carve-out: blind mode never sets scanMode to 'graphify',
-	// so hasGraphify below is already false for it.
+	// elsewhere in this file exists to close.
+	//
+	// !blind is checked explicitly here too, not left implicit — blind
+	// mode's own init always leaves scanMode null and the pre-test scan
+	// skips blind projects entirely, but /config's scanMode field has no
+	// blind-awareness of its own (it's a plain editable enum), and nothing
+	// stops a user from setting it to 'graphify' by hand. That alone can't
+	// add explain_symbol (graphifyGraphExists would still be false), but
+	// runAskFlow's refreshGraphifyIfEnabled reacts to scanMode alone and
+	// would actually run graphify against a blind workspace if it saw
+	// 'graphify' there — a graph existing afterward, however that
+	// happened, must never be enough on its own to add this tool.
 	const hasGraphify =
+		!context.orbitConfig.blind &&
 		context.orbitConfig.scanMode === 'graphify' &&
 		graphifyGraphExists(context.projectRoot);
 

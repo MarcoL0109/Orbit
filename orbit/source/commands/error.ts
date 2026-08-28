@@ -30,6 +30,10 @@ export type OrbitError =
 	// believed it finished...") assumes a setup agent actually ran. Blind
 	// mode never runs one at all, so it needs its own accurate message.
 	| {kind: 'blind-target-unreachable'; baseUrl: string}
+	// /scan and /coverage both rescan via scanProjectWithModeSelection with
+	// no blind-awareness of their own — this is the shared guard in front
+	// of both, rather than two copies of the same check.
+	| {kind: 'not-available-in-blind-mode'; command: string}
 	| {kind: 'unexpected'; action: string; cause: unknown};
 
 export type ArgCountRule = {exact: number} | {min: number};
@@ -92,6 +96,10 @@ Type /help to see available commands.`;
 
 		case 'blind-target-unreachable': {
 			return `${error.baseUrl} isn't reachable. Blind mode never tries to start or discover an environment for you — start the app yourself, then try again.`;
+		}
+
+		case 'not-available-in-blind-mode': {
+			return `${error.command} has no effect on a blind project — there is no local source to scan.`;
 		}
 
 		case 'unexpected': {

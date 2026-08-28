@@ -90,4 +90,13 @@ export type CommandContext = {
 	// auto-recovering, a deliberate tradeoff, not an oversight.
 	isEnvironmentReady: (projectRoot: string) => boolean;
 	markEnvironmentReady: (projectRoot: string) => void;
+	// Entering blind mode (a fresh workspace or switching to a known one)
+	// calls rememberProjectBeforeBlind() to snapshot whatever project was
+	// active at that moment; toggling blind mode back off calls
+	// restorePreviousProject() to return to exactly that, rather than
+	// dropping to "no project selected" or — worse — leaving the blind
+	// workspace itself active with its gates lifted. Session-only, not
+	// persisted: this is about undoing a navigation, not project state.
+	rememberProjectBeforeBlind: () => void;
+	restorePreviousProject: () => void;
 };

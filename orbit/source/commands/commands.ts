@@ -132,13 +132,20 @@ export function formatConfigFieldValue(
 // happened); if it wasn't chosen yet, or the project isn't /init'd, this is
 // a no-op. Non-fatal by the same reasoning /test's own pre-run scan uses —
 // a failed refresh just means explain_symbol works off whatever graph (if
-// any) was already on disk.
+// any) was already on disk. Also a no-op for a blind project even if its
+// scanMode somehow reads 'graphify' (nothing in this codebase should ever
+// set it there deliberately, but /config's scanMode field has no
+// blind-awareness of its own to prevent a manual edit) — running graphify
+// against Orbit's own workspace, which has no real app source in it, is
+// wrong regardless of whether the resulting graph would ever actually get
+// used (agent.ts's own hasGraphify check blocks that separately).
 function refreshGraphifyIfEnabled(
 	projectRoot: string,
 	hasOrbitFolder: boolean | undefined,
+	blind: boolean | undefined,
 	setMessages: CommandContext['setMessages'],
 ): void {
-	if (!hasOrbitFolder) return;
+	if (!hasOrbitFolder || blind) return;
 
 	try {
 		const orbitConfig = readOrbitConfig(projectRoot);
@@ -200,6 +207,12 @@ export async function startBlindProjectFlow(
 		return;
 	}
 
+	// Snapshotted right before context.project actually changes — whatever
+	// was active up to this exact point (a real project, another blind
+	// one, or nothing) is what toggling blind mode back off later should
+	// return to.
+	context.rememberProjectBeforeBlind();
+
 	const existing = findBlindProjectByUrl(targetUrl);
 
 	if (existing) {
@@ -260,6 +273,7 @@ export async function runAskFlow(
 		refreshGraphifyIfEnabled(
 			projectRoot,
 			context.project.hasOrbitFolder,
+			context.project.blind,
 			context.setMessages,
 		);
 
@@ -525,6 +539,14 @@ Available Orbit commands:
 				return;
 			}
 
+			if (context.project.blind) {
+				reportError(context.setMessages, {
+					kind: 'not-available-in-blind-mode',
+					command: '/scan',
+				});
+				return;
+			}
+
 			try {
 				context.setIsThinking(true);
 
@@ -623,23 +645,26 @@ Available Orbit commands:
 
 				if (chosenKey === '__blind__') {
 					if (configThisIteration.blind) {
-						// There's no "turn blind off" for this project's own
-						// config — a workspace with no real source can't
-						// become a normal project by flipping a bit (see the
-						// comment on OrbitConfig.blind). The actual way out
-						// is switching to a different project entirely, so
-						// open that picker directly instead of just telling
-						// the user to go run a different command themselves.
+						// A real on/off toggle, not a detour through the
+						// project picker — "off" can't mean "this workspace
+						// is now a normal project" (there's no source for it
+						// to reveal), so it means leaving it: back to
+						// whatever project was active right before this one
+						// was entered (rememberProjectBeforeBlind, called
+						// from startBlindProjectFlow), or "no project
+						// selected" if there wasn't one. The blind workspace
+						// itself is untouched on disk either way; /switch
+						// (or /config -> Blind mode again) can return to it
+						// by name later.
+						context.restorePreviousProject();
 						context.setMessages(previous => [
 							...previous,
 							{
 								role: 'agent',
 								content:
-									'This project is blind — opening the project picker so you can switch to something else.',
+									'Blind mode off. The workspace is still there; /switch back to it by name whenever you want.',
 							},
 						]);
-						context.setSelectProjectMode(true);
-						context.setProjectOptions(context.constructProjectOptions());
 						return;
 					}
 
@@ -660,6 +685,24 @@ Available Orbit commands:
 
 				const field = CONFIG_FIELDS.find(f => f.key === chosenKey);
 				if (!field) continue;
+
+				// Blind mode never scans — nothing sets scanMode to
+				// 'graphify' for it on any real path, but leaving the field
+				// editable would let it end up there anyway with no way to
+				// actually act on it (see hasGraphify's own blind check
+				// and refreshGraphifyIfEnabled). Refuse rather than accept
+				// a value that can only ever sit there doing nothing.
+				if (field.key === 'scanMode' && configThisIteration.blind) {
+					context.setMessages(previous => [
+						...previous,
+						{
+							role: 'agent',
+							content:
+								'Scan mode has no effect on a blind project — there is no local source to scan.',
+						},
+					]);
+					continue;
+				}
 
 				let nextConfig: OrbitConfig | null = null;
 
@@ -804,6 +847,14 @@ Available Orbit commands:
 		async handler(_args, context) {
 			if (!context.project?.root) {
 				reportError(context.setMessages, {kind: 'no-project-selected'});
+				return;
+			}
+
+			if (context.project.blind) {
+				reportError(context.setMessages, {
+					kind: 'not-available-in-blind-mode',
+					command: '/coverage',
+				});
 				return;
 			}
 
