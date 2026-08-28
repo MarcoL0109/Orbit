@@ -2,8 +2,18 @@ import process from 'node:process';
 import {
 	readGlobalProjects,
 	formatProjectsForTui,
+	findBlindProjectByUrl,
 } from '../registry/knownProjects.js';
-import {getProjectDisplayName, detectProjectAtPath} from '../projects/search.js';
+import {
+	getProjectDisplayName,
+	detectProjectAtPath,
+} from '../projects/search.js';
+import {
+	deriveBlindProjectName,
+	suggestBlindStoragePath,
+	isLikelyUrl,
+} from '../init/blindInit.js';
+import {isReachable} from '../projects/reachability.js';
 import {
 	describeAgentActivity,
 	summarizeMemory,
@@ -104,7 +114,11 @@ export function formatConfigFieldValue(
 	field: ConfigFieldDescriptor,
 ): string {
 	const value = config[field.key];
-	if (value === null) return '(none)';
+	// undefined alongside null: OrbitConfig types these fields as always
+	// present, but a config.json written before a field existed won't have
+	// the key at all — readOrbitConfig doesn't backfill, so this is the
+	// only place that actually sees the gap.
+	if (value === null || value === undefined) return '(none)';
 	if (Array.isArray(value))
 		return value.length > 0 ? value.join(', ') : '(none)';
 	return String(value);
@@ -150,6 +164,69 @@ function formatConfigSummary(config: OrbitConfig): string {
 		field => `${field.label}: ${formatConfigFieldValue(config, field)}`,
 	);
 	return `Current configuration:\n${lines.join('\n')}`;
+}
+
+// Shared by both places blind mode can be entered from: the project picker
+// (no project active yet — see /switch and boot's own no-project case) and
+// /config's "Blind mode" field (a project IS active, but blind mode always
+// means a SEPARATE workspace, never a rewrite of the active project's own
+// config — see the comment on OrbitConfig.blind). Either way this only ever
+// creates/looks up its own workspace and switches context.project to it; it
+// never reads or touches whatever project was active when it was called.
+export async function startBlindProjectFlow(
+	targetUrl: string,
+	context: CommandContext,
+): Promise<void> {
+	if (!isLikelyUrl(targetUrl)) {
+		reportError(context.setMessages, {
+			kind: 'invalid-blind-url',
+			url: targetUrl,
+		});
+		return;
+	}
+
+	// Checked right here, before anything else — a workspace (or a switch
+	// into an existing one) is only worth creating if there's actually
+	// something live to explore. Blind mode never tries to start or
+	// discover an environment itself (see runTestCommand's own reachability
+	// gate), so failing fast at URL entry is the only chance to catch this
+	// before the user is looking at a freshly-created, useless workspace.
+	const reachable = await isReachable(targetUrl);
+	if (!reachable) {
+		reportError(context.setMessages, {
+			kind: 'blind-target-unreachable',
+			baseUrl: targetUrl,
+		});
+		return;
+	}
+
+	const existing = findBlindProjectByUrl(targetUrl);
+
+	if (existing) {
+		context.setProject({
+			isProject: true,
+			root: existing.path,
+			confidence: 100,
+			markers: [],
+			hasOrbitFolder: true,
+			blind: true,
+			targetUrl: existing.targetUrl,
+		});
+		context.setMessages(previous => [
+			...previous,
+			{
+				role: 'system',
+				content: `Switched to blind project: ${existing.name} (${targetUrl})`,
+				color: 'green',
+			},
+		]);
+		return;
+	}
+
+	const projectName = deriveBlindProjectName(targetUrl);
+	context.setPendingBlindUrl(targetUrl);
+	context.setConfirmBlindPath(suggestBlindStoragePath(projectName));
+	context.setCheckBlindPath(true);
 }
 
 // Handles a plain-text prompt (no leading /) — not a command, so it's called
@@ -252,11 +329,11 @@ export const commands: OrbitCommand[] = [
 					content: `
 Available Orbit commands:
 /help       Show available commands
-/switch     Switch Orbit to work on a different project
+/switch     Switch Orbit to work on a different project — also offers "Set Up Blind Project" when nothing is active yet
 /init [path] Initialize Orbit — confirms the detected path first, or trusts an explicit one. Path is optional. If left empty, orbit will suggest one for you
 /deinit     Delete the .orbit folder within the current project
 /scan       Build index and context for the current project
-/config     View and change project configuration
+/config     View and change project configuration — includes turning Blind mode on, which sets up (or switches to) a URL-only project with no local codebase involved
 /test       Generate and run a Playwright test for a feature you describe
 /coverage   Show routes and components that don't have a matching test
 /projects   Show remembered projects
@@ -451,14 +528,12 @@ Available Orbit commands:
 			try {
 				context.setIsThinking(true);
 
-				const {projectMap, graphifyOutcome} = await scanProjectWithModeSelection(
-					context.project.root,
-					{
+				const {projectMap, graphifyOutcome} =
+					await scanProjectWithModeSelection(context.project.root, {
 						requestApproval: context.requestApproval,
 						requestScanMode: context.requestScanMode,
 						setMessages: context.setMessages,
-					},
-				);
+					});
 				const projectMapPath = writeProjectMap(
 					context.project.root,
 					projectMap,
@@ -525,9 +600,16 @@ Available Orbit commands:
 				const configThisIteration = orbitConfig;
 				const fieldOptions: Array<{label: string; value: string}> =
 					CONFIG_FIELDS.map(field => ({
-						label: `${field.label} (${formatConfigFieldValue(configThisIteration, field)})`,
+						label: `${field.label} (${formatConfigFieldValue(
+							configThisIteration,
+							field,
+						)})`,
 						value: field.key,
 					}));
+				fieldOptions.push({
+					label: `Blind mode (${configThisIteration.blind ? 'on' : 'off'})`,
+					value: '__blind__',
+				});
 				fieldOptions.push({label: 'Done', value: '__done__'});
 
 				const chosenKey = await context.requestSelect(
@@ -536,6 +618,43 @@ Available Orbit commands:
 				);
 
 				if (chosenKey === '__done__') {
+					return;
+				}
+
+				if (chosenKey === '__blind__') {
+					if (configThisIteration.blind) {
+						// There's no "turn blind off" for this project's own
+						// config — a workspace with no real source can't
+						// become a normal project by flipping a bit (see the
+						// comment on OrbitConfig.blind). The actual way out
+						// is switching to a different project entirely, so
+						// open that picker directly instead of just telling
+						// the user to go run a different command themselves.
+						context.setMessages(previous => [
+							...previous,
+							{
+								role: 'agent',
+								content:
+									'This project is blind — opening the project picker so you can switch to something else.',
+							},
+						]);
+						context.setSelectProjectMode(true);
+						context.setProjectOptions(context.constructProjectOptions());
+						return;
+					}
+
+					const url = await context.requestInput(
+						'URL of the app to explore blindly (https://...):',
+					);
+					if (url === null) continue;
+
+					// Kicks off the same separate-workspace flow the project
+					// picker uses — never rewrites this project's own config,
+					// see the comment on OrbitConfig.blind. Leaves the
+					// /config loop entirely once triggered: the active
+					// project is about to change, so there's nothing left
+					// here worth continuing to edit.
+					await startBlindProjectFlow(url, context);
 					return;
 				}
 
@@ -611,7 +730,10 @@ Available Orbit commands:
 					...previous,
 					{
 						role: 'agent',
-						content: `${field.label} updated to ${formatConfigFieldValue(updatedConfig, field)}.`,
+						content: `${field.label} updated to ${formatConfigFieldValue(
+							updatedConfig,
+							field,
+						)}.`,
 						color: 'green',
 					},
 				]);
@@ -706,7 +828,9 @@ Available Orbit commands:
 				projectMap = scanResult.projectMap;
 				writeProjectMap(context.project.root, projectMap);
 
-				const graphifyMessage = graphifyOutcomeMessage(scanResult.graphifyOutcome);
+				const graphifyMessage = graphifyOutcomeMessage(
+					scanResult.graphifyOutcome,
+				);
 				if (graphifyMessage) {
 					context.setMessages(previous => [
 						...previous,

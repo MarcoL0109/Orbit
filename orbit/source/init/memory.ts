@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {getOrbitDir} from './orbitDir.js';
 
 export type ProjectMemory = {
 	overview: string | null;
@@ -11,7 +12,7 @@ export type ProjectMemory = {
 const MAX_MEMORY_CHARS = 4000;
 
 function getMemoryDir(projectRoot: string): string {
-	return path.join(projectRoot, '.orbit', 'memory');
+	return path.join(getOrbitDir(projectRoot), 'memory');
 }
 
 function readMemoryFile(projectRoot: string, fileName: string): string | null {

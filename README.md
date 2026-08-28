@@ -21,6 +21,7 @@ AI QA agent for project scanning, test planning, and E2E automation
 * Tracks feature coverage — which routes and components have a matching test and which don't
 * Answers plain questions about the project directly — no `/command` needed — reading real code and, with your approval, running a real `/test` when you actually want one
 * Runs headlessly from a CI pipeline (`--ci`) — same agent, no interactive prompts, exits with a pass/fail status code
+* Tests an already-running app it has no source access to at all (**blind mode**) — pure live-browser exploration, in a workspace of its own, for cases where reading the codebase isn't an option
 
 Every file write, shell command, and test run is approval-gated by default — you see exactly what Orbit is about to do before it does it.
 
@@ -194,6 +195,21 @@ Example GitHub Actions step:
 
 Orbit doesn't generate or manage this file itself — `--ci` just gives any CI system (GitHub Actions, GitLab CI, Jenkins, ...) a normal exit-code contract to run against.
 
+## Blind mode
+
+For a project Orbit shouldn't read at all — not "won't," structurally can't. Blind mode explores an already-running app purely through a live browser, from a workspace Orbit creates for itself outside the app's own directory. `read_file` and `explain_symbol` aren't just discouraged in this mode, they're removed from the tool set entirely — the model has no way to call them even if it tried. There's no project scan, either, and Orbit never tries to bring the app up itself if it isn't reachable: a blind project has no source for a setup agent to discover a startup sequence from, so an unreachable target fails fast with a clear message instead of guessing.
+
+Enter it from `/config` — select **Blind mode** and give it the app's URL — or, if no project is active yet, from the project picker's **Set Up Blind Project** option (offered alongside "Add New Project"). Either way:
+
+1. The URL is checked for reachability twice: once the moment you enter it (before anything is shown or created), and again right before the workspace is actually written to disk. A target that's unreachable — or goes unreachable in the gap between typing the URL and confirming the storage path — never leaves a workspace behind.
+2. If the URL is already known, Orbit switches straight to that project — no re-prompting, no re-creating anything.
+3. Otherwise you're shown a suggested storage path (`~/Orbit/<name>`, derived from the URL's host and port) to confirm or edit before anything is created.
+4. Playwright installs directly into that workspace — it never depends on (or touches) any `node_modules` belonging to the actual app, since blind mode assumes there may be no local copy of the app to depend on at all.
+
+A blind workspace's own Orbit folder is named `orbit`, not `.orbit`. A normal project keeps the dot so the folder reads as "tool state, not your code" next to real source — a blind workspace has nothing else in it to distinguish itself from, so hiding it the same way would just bury the one thing this mode is supposed to make easy to inspect.
+
+There's no way to turn blind mode "off" on a project in place — a workspace with no real source can't become a normal one by flipping a config bit. Selecting **Blind mode** again from `/config` while already on a blind project opens the project picker instead, the same way `/switch` does — that's the actual way out.
+
 ## `.orbit/` — per-project context
 
 ```txt
@@ -217,6 +233,8 @@ Orbit doesn't generate or manage this file itself — `--ci` just gives any CI s
 `graphify-out/` (graph.json, GRAPH_REPORT.md, etc.) is written at your project root, not inside `.orbit/`, since that's where graphify's own incremental caching expects it to live — Orbit adds it to your `.gitignore` automatically.
 
 Run `/memory` to read `overview.md`, `decisions.md`, `environment_setup.md` and `failures.md` back in the terminal instead of opening them by hand — pass `--overview`, `--decisions`, `--env` and/or `--failures` to see only some of them; with no flags it shows all three.
+
+This layout, folder name included, is specific to a normal project. A [blind-mode](#blind-mode) workspace uses the exact same structure under a folder named `orbit` instead of `.orbit` — see that section for why.
 
 ### Configuration (`.orbit/config.json`)
 

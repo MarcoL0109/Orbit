@@ -15,6 +15,10 @@ type ProjectDetectionResult = {
 
 const ROOT_MARKERS = [
 	'.orbit',
+	// A blind-mode project's own Orbit folder (see orbitDir.ts) — the same
+	// marker as '.orbit', just for a workspace that has no other content to
+	// hide it from.
+	'orbit',
 	'orbit.config.ts',
 	'orbit.config.js',
 	'package.json',
@@ -60,7 +64,7 @@ function scoreMarkers(markers: string[]): number {
 	let score = 0;
 
 	for (const marker of markers) {
-		if (marker === '.orbit') score += 80;
+		if (marker === '.orbit' || marker === 'orbit') score += 80;
 		else if (marker.startsWith('orbit.config')) score += 75;
 		else if (marker === 'package.json') score += 50;
 		else if (marker.startsWith('playwright.config')) score += 45;
@@ -120,7 +124,7 @@ export function detectProjectRoot(
 				packageManager: detectPackageManager(markers),
 				framework: detectFramework(markers),
 				testFramework: detectTestFramework(markers),
-				hasOrbitFolder: markers.includes('.orbit'),
+				hasOrbitFolder: markers.includes('.orbit') || markers.includes('orbit'),
 			};
 		}
 
@@ -180,7 +184,7 @@ export function detectProjectAtPath(
 		packageManager: detectPackageManager(markers),
 		framework: detectFramework(markers),
 		testFramework: detectTestFramework(markers),
-		hasOrbitFolder: markers.includes('.orbit'),
+		hasOrbitFolder: markers.includes('.orbit') || markers.includes('orbit'),
 	};
 }
 

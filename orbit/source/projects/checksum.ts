@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {getOrbitDir} from '../init/orbitDir.js';
 
 export type ChecksumsFile = {
 	version: 1;
@@ -97,7 +98,7 @@ export function compareChecksums(
 }
 
 function getChecksumsJsonPath(projectRoot: string) {
-	return path.join(projectRoot, '.orbit', 'index', 'checksums.json');
+	return path.join(getOrbitDir(projectRoot), 'index', 'checksums.json');
 }
 
 export function readChecksumsFile(projectRoot: string): ChecksumsFile | null {

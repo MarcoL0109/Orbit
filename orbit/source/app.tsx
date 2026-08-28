@@ -12,7 +12,14 @@ import {validateProjectPath} from './projects/path.js';
 import {rememberProject, readGlobalProjects} from './registry/knownProjects.js';
 import {initOrbitProject} from './init/init.js';
 import type {InitFileAction} from './init/init.js';
-import type {Message, ProjectOptions, ProjectInfo} from './commands/context.js';
+import {deriveBlindProjectName} from './init/blindInit.js';
+import {isReachable} from './projects/reachability.js';
+import type {
+	Message,
+	ProjectOptions,
+	ProjectInfo,
+	CommandContext,
+} from './commands/context.js';
 import {runCommand} from './commands/runCommand.js';
 import {
 	getBestCommandCompletion,
@@ -38,8 +45,35 @@ import {
 	CONFIG_FIELDS,
 	formatConfigFieldValue,
 	runAskFlow,
+	startBlindProjectFlow,
 } from './commands/commands.js';
 import {generateRecommendedPrompt} from './ai/recommendPrompt.js';
+import {theme} from './ui/theme.js';
+
+// Every pendingX/checkX prompt below renders through this so a decision
+// prompt looks the same regardless of which one is asking — border color is
+// the only thing that varies, and it's chosen per call site to mean
+// something (warning = an action Orbit wants to take, danger = a
+// destructive one, accent = Orbit just needs information from you).
+function PromptBox({
+	borderColor,
+	children,
+}: {
+	borderColor: string;
+	children: React.ReactNode;
+}) {
+	return (
+		<Box
+			flexDirection="column"
+			borderStyle="round"
+			borderColor={borderColor}
+			paddingX={1}
+			marginTop={1}
+		>
+			{children}
+		</Box>
+	);
+}
 
 type AppProps = {
 	readonly initialPrompt?: string;
@@ -66,11 +100,15 @@ export function App({initialPrompt}: AppProps) {
 	const [selectedProjectOption, setSelectedProjectOption] =
 		useState<string>('');
 	const [inputPath, setInputPath] = useState<string>('');
+	const [inputBlindUrl, setInputBlindUrl] = useState<string>('');
 	const [checkName, setCheckName] = useState<boolean>(false);
 	const [confirmDeinit, setConfirmDeinit] = useState<boolean>(false);
 	const [confirmName, setConfirmName] = useState<string>('');
 	const [checkInitPath, setCheckInitPath] = useState<boolean>(false);
 	const [confirmInitPath, setConfirmInitPath] = useState<string>('');
+	const [checkBlindPath, setCheckBlindPath] = useState<boolean>(false);
+	const [confirmBlindPath, setConfirmBlindPath] = useState<string>('');
+	const [pendingBlindUrl, setPendingBlindUrl] = useState<string>('');
 	const [pendingApproval, setPendingApproval] = useState<{
 		description: string;
 		resolve: (approved: boolean) => void;
@@ -306,7 +344,7 @@ export function App({initialPrompt}: AppProps) {
 			return;
 		}
 
-		if (item.value === 'add') {
+		if (item.value === 'add' || item.value === 'blind') {
 			setSelectedProjectOption(item.value);
 			return;
 		}
@@ -370,6 +408,10 @@ export function App({initialPrompt}: AppProps) {
 			label: '-> Add New Project',
 			value: 'add',
 		});
+		options.push({
+			label: '-> Set Up Blind Project (URL only, no local source)',
+			value: 'blind',
+		});
 		if (project) {
 			options.push({
 				label: '-> Exit Menu',
@@ -407,21 +449,12 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 `;
 	}
 
-	const handleSubmitQuery = async (value: string) => {
-		const prompt = value.trim();
-
-		if (!prompt) return;
-		setQuery('');
-
-		setMessages(previous => [
-			...previous,
-			{
-				role: 'user',
-				content: prompt,
-			},
-		]);
-
-		const commandContext = {
+	// Built once, called from anywhere that needs to dispatch a command —
+	// handleSubmitQuery (typed input) and handleBlindUrlSubmit (the
+	// project-picker's "Set Up Blind Project" option) both need the exact
+	// same context, and this is the one place its ~25 fields are listed.
+	function buildCommandContext(): CommandContext {
+		return {
 			setMessages,
 			setQuery,
 			setIsThinking,
@@ -436,6 +469,9 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 			setConfirmName,
 			setCheckInitPath,
 			setConfirmInitPath,
+			setCheckBlindPath,
+			setConfirmBlindPath,
+			setPendingBlindUrl,
 			startAbortableTask,
 			clearAbortableTask,
 			abortCurrentTask,
@@ -449,6 +485,23 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 			isEnvironmentReady,
 			markEnvironmentReady,
 		};
+	}
+
+	const handleSubmitQuery = async (value: string) => {
+		const prompt = value.trim();
+
+		if (!prompt) return;
+		setQuery('');
+
+		setMessages(previous => [
+			...previous,
+			{
+				role: 'user',
+				content: prompt,
+			},
+		]);
+
+		const commandContext = buildCommandContext();
 
 		const commandHandled = await runCommand(prompt, commandContext);
 
@@ -516,6 +569,28 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 		setSelectedProjectOption('');
 	};
 
+	// Reuses startBlindProjectFlow (validation, known-URL lookup, the
+	// storage-path confirm prompt) rather than reimplementing any of it —
+	// the same shared flow /config's "Blind mode" field triggers too, just
+	// reached here for the case where no project is active yet, so the
+	// free-text input bar isn't available (selectProjectMode is showing
+	// this picker instead).
+	const handleBlindUrlSubmit = async (value: string) => {
+		const url = value.trim();
+		setSelectProjectMode(false);
+		setSelectedProjectOption('');
+		setInputBlindUrl('');
+
+		if (!url) return;
+
+		setMessages(previous => [
+			...previous,
+			{role: 'user', content: `Set up blind project: ${url}`},
+		]);
+
+		await startBlindProjectFlow(url, buildCommandContext());
+	};
+
 	const handleConfirmInitPath = () => {
 		// Unmount this TextInput before anything else, same reasoning as
 		// handleConfirmNameInit below — it must not still be listening once
@@ -546,6 +621,102 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 		setProject(detected);
 		setConfirmName(getProjectDisplayName(detected.root));
 		setCheckName(true);
+	};
+
+	// No separate name-confirmation step here, unlike normal /init — the
+	// derived name (from the URL's hostname) is only ever used as a
+	// registry label, never shown as "your project" the way a real
+	// codebase's name is, so there's nothing worth pausing to confirm twice.
+	const handleConfirmBlindPath = async () => {
+		setCheckBlindPath(false);
+		const storageRoot = confirmBlindPath;
+		const targetUrl = pendingBlindUrl;
+		setConfirmBlindPath('');
+		setPendingBlindUrl('');
+
+		const projectName = deriveBlindProjectName(targetUrl);
+
+		setIsInitting(true);
+
+		try {
+			// Re-checked here, not just trusted from startBlindProjectFlow's
+			// earlier check at URL-entry time — the user may have taken a
+			// while confirming (or editing) the storage path, and the site
+			// could have gone down in the meantime. Nothing gets created
+			// until this exact moment passes too, so a workspace is never
+			// left behind for a target that turned out unreachable.
+			const reachable = await isReachable(targetUrl);
+			if (!reachable) {
+				reportError(setMessages, {
+					kind: 'blind-target-unreachable',
+					baseUrl: targetUrl,
+				});
+				return;
+			}
+
+			initOrbitProject({
+				projectRoot: storageRoot,
+				projectName,
+				blind: {targetUrl},
+			});
+
+			rememberProject({
+				name: projectName,
+				path: storageRoot,
+				blind: true,
+				targetUrl,
+			});
+
+			setProject({
+				isProject: true,
+				root: storageRoot,
+				confidence: 100,
+				markers: [],
+				hasOrbitFolder: true,
+				blind: true,
+				targetUrl,
+			});
+
+			// storageRoot is a fresh directory Orbit just created — never the
+			// target's own node_modules (there is no target codebase in blind
+			// mode) — so Playwright has to be installed here specifically, not
+			// inherited from anywhere. npm installs fine into a directory with
+			// no package.json yet; it creates a minimal one itself.
+			let playwrightMessage: {content: string; color: string} | null = null;
+			try {
+				const playwrightOutcome = await ensurePlaywrightSetup(storageRoot, {
+					requestApproval,
+				});
+				playwrightMessage = playwrightSetupOutcomeMessage(playwrightOutcome);
+			} catch (error) {
+				reportError(setMessages, {
+					kind: 'unexpected',
+					action: 'Installing Playwright for the blind project',
+					cause: error,
+				});
+			}
+
+			setMessages(previous => [
+				...previous,
+				{
+					role: 'agent',
+					content: `Blind project set up: ${projectName}
+Storage: ${storageRoot}
+Target: ${targetUrl}
+${playwrightMessage ? `\n${playwrightMessage.content}\n` : ''}
+Orbit will explore this app purely through a live browser — nothing outside ${storageRoot} is ever read or written.`,
+					color: 'green',
+				},
+			]);
+		} catch (error) {
+			reportError(setMessages, {
+				kind: 'unexpected',
+				action: 'Setting up the blind project',
+				cause: error,
+			});
+		} finally {
+			setIsInitting(false);
+		}
 	};
 
 	const handleConfirmNameInit = async () => {
@@ -696,7 +867,6 @@ Global memory updated:
 
 				const path = projectPath.route;
 				deinitLocalContext(path);
-				project.hasOrbitFolder = false;
 				setMessages(previous => [
 					...previous,
 					{
@@ -718,6 +888,14 @@ Global memory updated:
 						]);
 					}
 				}
+
+				// Reset to a clean "no project" state rather than mutating
+				// the old object in place — the local orbit/.orbit folder
+				// is gone now, so hasOrbitFolder, blind, targetUrl, and
+				// everything else about the old project are all stale.
+				// Leaving any of it behind is exactly what left a deinit'd
+				// blind project stuck still showing itself as blind.
+				setProject(null);
 			}
 		}
 
@@ -735,151 +913,235 @@ Global memory updated:
 
 	return (
 		<Box flexDirection="column">
-			<Box borderStyle="round" paddingX={1} flexDirection="column">
+			<Box
+				borderStyle="round"
+				borderColor={theme.accent}
+				paddingX={1}
+				flexDirection="column"
+			>
 				<Box justifyContent="space-between">
-					<Text bold>🪐 Orbit</Text>
-					<Text color="cyan">Interactive Mode</Text>
+					<Text bold color={theme.accent}>
+						🪐 Orbit
+					</Text>
+					<Text color={theme.accent}>
+						{project?.blind ? '⊘ Blind' : '⊙ Interactive'}
+					</Text>
 				</Box>
 
-				<Text>AI QA agent for E2E testing</Text>
+				<Text dimColor>AI QA agent for E2E testing</Text>
 
-				<Box marginTop={1} flexDirection="column">
+				<Box marginTop={2} flexDirection="column">
 					{isBooting && (
-						<Text color="yellow">
+						<Text color={theme.warning}>
 							<Spinner type="dots" /> Detecting project context...
 						</Text>
 					)}
 
-					{!isBooting && project?.isProject && (
-						<>
-							<Text>
-								Project Path: <Text>{project.root}</Text>
+					{!isBooting && project?.isProject && project.blind && (
+						<Box flexDirection="column" marginTop={1}>
+							<Text dimColor bold>
+								PROJECT
 							</Text>
-							<Text>
-								Confidence: <Text color="green">{project.confidence}%</Text>
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Mode</Text>
+								</Box>
+								<Text color={theme.accent}>⊘ Blind — no local source</Text>
+							</Box>
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Target</Text>
+								</Box>
+								<Text>{project.targetUrl}</Text>
+							</Box>
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Storage</Text>
+								</Box>
+								<Text>{project.root}</Text>
+							</Box>
+						</Box>
+					)}
+
+					{!isBooting && project?.isProject && !project.blind && (
+						<Box flexDirection="column" marginTop={1}>
+							<Text dimColor bold>
+								PROJECT
 							</Text>
-							<Text>
-								Stack:{' '}
-								<Text color="green">
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Path</Text>
+								</Box>
+								<Text>{project.root}</Text>
+							</Box>
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Confidence</Text>
+								</Box>
+								<Text color={theme.success}>{project.confidence}%</Text>
+							</Box>
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Stack</Text>
+								</Box>
+								<Text>
 									{[
 										project.framework,
 										project.testFramework,
 										project.packageManager,
 									]
 										.filter(Boolean)
-										.join(' + ') || 'Unknown'}
+										.join(' · ') || 'Unknown'}
 								</Text>
-							</Text>
-							<Text>
-								Orbit Context:{' '}
-								<Text color={project.hasOrbitFolder ? 'green' : 'red'}>
-									{project.hasOrbitFolder ? 'Initialized' : 'Not Initialized'}
+							</Box>
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Context</Text>
+								</Box>
+								<Text
+									color={project.hasOrbitFolder ? theme.success : theme.danger}
+								>
+									{project.hasOrbitFolder ? 'Initialized' : 'Not initialized'}
 								</Text>
-							</Text>
-						</>
+							</Box>
+						</Box>
 					)}
 
 					{!isBooting && !project?.isProject && (
-						<>
-							<Text color="red">No project detected</Text>
-							<Text>
+						<Box flexDirection="column" marginTop={1}>
+							<Text color={theme.danger} bold>
+								No project detected
+							</Text>
+							<Text dimColor>
 								Run Orbit inside a project or choose a recent project.
 							</Text>
-						</>
+						</Box>
 					)}
 
 					{orbitConfig && (
-						<>
-							<Text>
-								Approval mode:{' '}
+						<Box flexDirection="column" marginTop={1}>
+							<Text dimColor bold>
+								CONFIG
+							</Text>
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Approval</Text>
+								</Box>
 								<Text
 									color={
-										orbitConfig.approvalMode === 'always' ? 'green' : 'yellow'
+										orbitConfig.approvalMode === 'always'
+											? theme.success
+											: theme.warning
 									}
 								>
 									{orbitConfig.approvalMode === 'always'
 										? 'Always allow'
 										: 'Ask before running'}
 								</Text>
-							</Text>
-							<Text>
-								Write mode:{' '}
+							</Box>
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Write</Text>
+								</Box>
 								<Text
 									color={
-										orbitConfig.writeMode === 'always' ? 'green' : 'yellow'
+										orbitConfig.writeMode === 'always'
+											? theme.success
+											: theme.warning
 									}
 								>
 									{orbitConfig.writeMode === 'always'
 										? 'Always allow'
 										: 'Ask before writing'}
 								</Text>
-							</Text>
+							</Box>
 							{CONFIG_FIELDS.filter(
 								field =>
 									field.key !== 'approvalMode' && field.key !== 'writeMode',
 							).map(field => (
-								<Text key={field.key}>
-									{field.label}:{' '}
-									<Text color="cyan">
-										{formatConfigFieldValue(orbitConfig, field)}
-									</Text>
-								</Text>
+								<Box key={field.key}>
+									<Box width={24}>
+										<Text dimColor>{field.label}</Text>
+									</Box>
+									<Text>{formatConfigFieldValue(orbitConfig, field)}</Text>
+								</Box>
 							))}
-							<Text>
-								Test dir: <Text color="cyan">{orbitConfig.testDir}</Text>
-							</Text>
-							<Text>
-								Manual test dir:{' '}
-								<Text color="cyan">{orbitConfig.manualTestDir}</Text>
-							</Text>
-							<Text>
-								Docker compose file:{' '}
-								<Text color="cyan">
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Test dir</Text>
+								</Box>
+								<Text>{orbitConfig.testDir}</Text>
+							</Box>
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Manual dir</Text>
+								</Box>
+								<Text>{orbitConfig.manualTestDir}</Text>
+							</Box>
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Docker</Text>
+								</Box>
+								<Text>
 									{orbitConfig.dockerComposeFile ?? '(none)'}
+									{orbitConfig.dockerComposeFile
+										? ` — healthchecks: ${
+												orbitConfig.dockerComposeHasHealthchecks ? 'yes' : 'no'
+										  }`
+										: ''}
 								</Text>
-							</Text>
-							<Text>
-								Docker compose healthchecks:{' '}
-								<Text color="cyan">
-									{orbitConfig.dockerComposeHasHealthchecks ? 'yes' : 'no'}
-								</Text>
-							</Text>
-						</>
+							</Box>
+						</Box>
 					)}
 				</Box>
 			</Box>
 
 			<Box marginTop={1} flexDirection="column">
-				{messages.map((message, index) => (
-					<Text key={index} color={message.color || 'none'}>
-						{message.role === 'user'
-							? `You: ${message.content}`
+				{messages.map((message, index) => {
+					const tag =
+						message.role === 'user'
+							? '[you] '
 							: message.role === 'agent'
-							? `Orbit: ${message.content}`
-							: message.content}
-					</Text>
-				))}
+							? '[orbit] '
+							: null;
+					const tagColor = message.role === 'user' ? theme.user : theme.accent;
+
+					return (
+						<Box key={index} marginTop={index === 0 ? 0 : 1}>
+							<Text color={message.color} dimColor={message.dim}>
+								{tag && (
+									<Text
+										bold
+										color={
+											message.color ?? (message.dim ? undefined : tagColor)
+										}
+									>
+										{tag}
+									</Text>
+								)}
+								{message.content}
+							</Text>
+						</Box>
+					);
+				})}
 			</Box>
 
-			{isBooting ||
-			selectProjectMode ||
-			confirmDeinit ||
-			checkName ||
-			checkInitPath ||
-			isInitting ||
-			pendingApproval ||
-			pendingScanMode ||
-			pendingOutcomeConfirmation ||
-			pendingSelect ||
-			pendingInput ? (
+			{!(
+				isBooting ||
+				selectProjectMode ||
+				confirmDeinit ||
+				checkName ||
+				checkInitPath ||
+				checkBlindPath ||
+				isInitting ||
+				pendingApproval ||
+				pendingScanMode ||
+				pendingOutcomeConfirmation ||
+				pendingSelect ||
+				pendingInput
+			) && (
 				<Box marginTop={1}>
-					<Text color="yellow">
-						<Spinner type="dots" /> Selection Menu In Progress...
-					</Text>
-				</Box>
-			) : (
-				<Box marginTop={1}>
-					<Text color="cyan">{'> '}</Text>
+					<Text color={theme.user}>{'❯ '}</Text>
 					<TextInput
 						key={queryInputKey}
 						value={query}
@@ -896,10 +1158,10 @@ Global memory updated:
 			)}
 
 			{selectProjectMode && (
-				<Box flexDirection="column">
+				<PromptBox borderColor={theme.accent}>
 					<Text>Select an option (Use arrow keys and Enter):</Text>
 					<SelectInput items={projectOptions} onSelect={handleProjectSelect} />
-				</Box>
+				</PromptBox>
 			)}
 
 			{selectedProjectOption === 'add' && (
@@ -913,8 +1175,19 @@ Global memory updated:
 				</Box>
 			)}
 
+			{selectedProjectOption === 'blind' && (
+				<Box marginTop={1}>
+					<TextInput
+						value={inputBlindUrl}
+						placeholder="Paste the app's URL (https://...)"
+						onChange={setInputBlindUrl}
+						onSubmit={handleBlindUrlSubmit}
+					/>
+				</Box>
+			)}
+
 			{checkInitPath && (
-				<Box marginTop={1} flexDirection="column">
+				<PromptBox borderColor={theme.accent}>
 					<Text>
 						Detected project path shown below. Press Enter to use it, or edit it
 						first.
@@ -925,17 +1198,33 @@ Global memory updated:
 						onChange={setConfirmInitPath}
 						onSubmit={handleConfirmInitPath}
 					/>
-				</Box>
+				</PromptBox>
+			)}
+
+			{checkBlindPath && (
+				<PromptBox borderColor={theme.accent}>
+					<Text>
+						Blind mode — no local codebase is read or written. Where should
+						Orbit store its own files for {pendingBlindUrl}? Press Enter to use
+						this path, or edit it first.
+					</Text>
+					<TextInput
+						value={confirmBlindPath}
+						placeholder="Storage path"
+						onChange={setConfirmBlindPath}
+						onSubmit={handleConfirmBlindPath}
+					/>
+				</PromptBox>
 			)}
 
 			{isInitting && (
-				<Text color="yellow">
+				<Text color={theme.warning}>
 					<Spinner type="dots" /> Initializing Orbit Context...
 				</Text>
 			)}
 
 			{checkName && (
-				<Box marginTop={1} flexDirection="column">
+				<PromptBox borderColor={theme.accent}>
 					<Text>The following name is detected. You can type in your own</Text>
 					<TextInput
 						value={confirmName}
@@ -943,18 +1232,18 @@ Global memory updated:
 						onChange={setConfirmName}
 						onSubmit={handleConfirmNameInit}
 					/>
-				</Box>
+				</PromptBox>
 			)}
 
 			{isThinking && (
-				<Text color="yellow">
+				<Text color={theme.warning}>
 					<Spinner type="dots" /> {agentActivity ?? "Orbit's thinking..."}
 				</Text>
 			)}
 
 			{confirmDeinit && (
-				<Box flexDirection="column">
-					<Text color="red">
+				<PromptBox borderColor={theme.danger}>
+					<Text color={theme.danger}>
 						Are you sure to deinit orbit context for this project. All context
 						will be deleted after this
 					</Text>
@@ -962,13 +1251,13 @@ Global memory updated:
 						items={confirmationOptions}
 						onSelect={handleConfirmDeinit}
 					/>
-				</Box>
+				</PromptBox>
 			)}
 
 			{pendingApproval && (
-				<Box flexDirection="column">
-					<Text color="yellow">
-						Orbit wants to: {pendingApproval.description}
+				<PromptBox borderColor={theme.warning}>
+					<Text color={theme.warning}>
+						⚠ Orbit wants to: {pendingApproval.description}
 					</Text>
 					<SelectInput
 						items={[
@@ -977,12 +1266,12 @@ Global memory updated:
 						]}
 						onSelect={handleApprovalSelect}
 					/>
-				</Box>
+				</PromptBox>
 			)}
 
 			{pendingScanMode && (
-				<Box flexDirection="column">
-					<Text color="yellow">
+				<PromptBox borderColor={theme.accent}>
+					<Text color={theme.accent}>
 						How should Orbit understand this project's code?
 					</Text>
 					<SelectInput
@@ -999,12 +1288,12 @@ Global memory updated:
 						]}
 						onSelect={handleScanModeSelect}
 					/>
-				</Box>
+				</PromptBox>
 			)}
 
 			{pendingOutcomeConfirmation && (
-				<Box flexDirection="column">
-					<Text color="yellow">
+				<PromptBox borderColor={theme.accent}>
+					<Text color={theme.accent}>
 						Orbit isn't sure whether this is a success or a failure — feature:{' '}
 						{pendingOutcomeConfirmation.feature}
 					</Text>
@@ -1019,22 +1308,22 @@ Global memory updated:
 						]}
 						onSelect={handleOutcomeConfirmationSelect}
 					/>
-				</Box>
+				</PromptBox>
 			)}
 
 			{pendingSelect && (
-				<Box flexDirection="column">
-					<Text color="yellow">{pendingSelect.prompt}</Text>
+				<PromptBox borderColor={theme.accent}>
+					<Text color={theme.accent}>{pendingSelect.prompt}</Text>
 					<SelectInput
 						items={pendingSelect.options}
 						onSelect={handleSelectChoice}
 					/>
-				</Box>
+				</PromptBox>
 			)}
 
 			{pendingInput && (
-				<Box flexDirection="column">
-					<Text color="yellow">Orbit needs: {pendingInput.prompt}</Text>
+				<PromptBox borderColor={theme.accent}>
+					<Text color={theme.accent}>Orbit needs: {pendingInput.prompt}</Text>
 					<Text dimColor>(Press Esc to decline)</Text>
 					<TextInput
 						value={pendingInputValue}
@@ -1042,11 +1331,11 @@ Global memory updated:
 						onChange={setPendingInputValue}
 						onSubmit={handleInputSubmit}
 					/>
-				</Box>
+				</PromptBox>
 			)}
 
 			<Box marginTop={1}>
-				<Text color="red">Type '/exit' to quit</Text>
+				<Text dimColor>/help for instructions</Text>
 			</Box>
 		</Box>
 	);

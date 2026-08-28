@@ -2,6 +2,7 @@ import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {resolveConfiguredDir} from '../../init/config.js';
+import {getOrbitDir} from '../../init/orbitDir.js';
 import type {ToolDefinition} from './types.js';
 
 export type TestFailureDetail = {
@@ -268,19 +269,15 @@ export const runTestTool: ToolDefinition<RunTestArgs, RunTestResult> = {
 		}
 
 		const testDirAbsolute = testDirResolution.path;
-		const indexDir = path.join(context.projectRoot, '.orbit', 'index');
+		const orbitDir = getOrbitDir(context.projectRoot);
+		const indexDir = path.join(orbitDir, 'index');
 
 		// A fresh, uniquely-named subfolder per run — Playwright cleans
 		// outputDir at the start of every run, so a fixed shared path would
 		// silently wipe out a prior run's screenshots/traces/videos (and
 		// any session log or repair-loop step still referencing them).
 		const runId = new Date().toISOString().replace(/[:.]/g, '-');
-		const outputDirAbsolute = path.join(
-			context.projectRoot,
-			'.orbit',
-			'traces',
-			runId,
-		);
+		const outputDirAbsolute = path.join(orbitDir, 'traces', runId);
 		fs.mkdirSync(indexDir, {recursive: true});
 		fs.mkdirSync(outputDirAbsolute, {recursive: true});
 

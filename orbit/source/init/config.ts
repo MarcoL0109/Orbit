@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {getOrbitDir} from './orbitDir.js';
 
 // 'ask' prompts the user (via the Ink UI) before the action; 'always' skips
 // the prompt and proceeds automatically.
@@ -50,10 +51,19 @@ export type OrbitConfig = {
 	// Null (the default) means projectRoot is used as-is, which is correct
 	// for the common case where the project root already is the repo root.
 	environmentSetupRoot: string | null;
+	// Structural, not a switch to flip on this project's own config —
+	// true only for a workspace initOrbitProject created specifically for
+	// blind mode (source never present, projectRoot points at Orbit's own
+	// storage). Turning blind mode "on" is a /config action that creates a
+	// SEPARATE project and switches to it (see commands.ts), never a
+	// rewrite of this field on the project you were just looking at — a
+	// project with real source next to this config never becomes blind by
+	// flipping a bit, since the source would still be sitting right there.
+	blind: boolean;
 };
 
 export function getOrbitConfigPath(projectRoot: string): string {
-	return path.join(projectRoot, '.orbit', 'config.json');
+	return path.join(getOrbitDir(projectRoot), 'config.json');
 }
 
 export function readOrbitConfig(projectRoot: string): OrbitConfig | null {

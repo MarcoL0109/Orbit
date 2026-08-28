@@ -13,6 +13,7 @@ export type OrbitError =
 	| {kind: 'invalid-project-path'; path: string}
 	| {kind: 'project-already-initialized'}
 	| {kind: 'project-not-initialized'}
+	| {kind: 'invalid-blind-url'; url: string}
 	| {kind: 'post-init-scan-failed'; cause: unknown}
 	// The environment setup agent never called signal_environment_ready —
 	// ran out of steps, or genuinely couldn't proceed (e.g. a needed
@@ -24,6 +25,11 @@ export type OrbitError =
 	// wrong. Kept separate from the above since "confidently wrong" is a
 	// more actionable signal than "never got there."
 	| {kind: 'environment-not-reachable'; baseUrl: string; notes: string}
+	// Blind mode's own unreachable case — deliberately not folded into
+	// environment-not-reachable above, whose wording ("the setup agent
+	// believed it finished...") assumes a setup agent actually ran. Blind
+	// mode never runs one at all, so it needs its own accurate message.
+	| {kind: 'blind-target-unreachable'; baseUrl: string}
 	| {kind: 'unexpected'; action: string; cause: unknown};
 
 export type ArgCountRule = {exact: number} | {min: number};
@@ -66,6 +72,10 @@ Type /help to see available commands.`;
 			return 'This project has no Orbit context yet. Run /init first.';
 		}
 
+		case 'invalid-blind-url': {
+			return `"${error.url}" isn't a valid http(s) URL. /blind needs the full address of the running app, e.g. https://example.com.`;
+		}
+
 		case 'post-init-scan-failed': {
 			return `Project initialized, but the initial scan failed: ${causeMessage(
 				error.cause,
@@ -78,6 +88,10 @@ Type /help to see available commands.`;
 
 		case 'environment-not-reachable': {
 			return `The setup agent believed it finished, but ${error.baseUrl} still isn't reachable. What it did: ${error.notes}`;
+		}
+
+		case 'blind-target-unreachable': {
+			return `${error.baseUrl} isn't reachable. Blind mode never tries to start or discover an environment for you — start the app yourself, then try again.`;
 		}
 
 		case 'unexpected': {

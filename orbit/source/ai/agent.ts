@@ -168,10 +168,26 @@ type VerifiedBrowserAction =
 			action: 'click' | 'selectOption' | 'hover';
 			selector: string;
 			value: string | null;
+			frame: string | null;
 	  }
-	| {action: 'fill'; selector: string; value: string | null}
-	| {action: 'press'; selector: string | null; key: string}
-	| {action: 'wait'; selector: string; state: 'visible' | 'hidden'};
+	| {
+			action: 'fill';
+			selector: string;
+			value: string | null;
+			frame: string | null;
+	  }
+	| {
+			action: 'press';
+			selector: string | null;
+			key: string;
+			frame: string | null;
+	  }
+	| {
+			action: 'wait';
+			selector: string;
+			state: 'visible' | 'hidden';
+			frame: string | null;
+	  };
 
 // Pulled straight from this run's own browser_action call log — the exact
 // selector strings already confirmed to work against the real, live page,
@@ -209,6 +225,7 @@ function collectVerifiedSelectorsThisRun(
 			selector?: string | null;
 			value?: string | null;
 			key?: string | null;
+			frame?: string | null;
 		};
 
 		if (
@@ -221,18 +238,21 @@ function collectVerifiedSelectorsThisRun(
 				action: args.action,
 				selector: args.selector,
 				value: args.value ?? null,
+				frame: args.frame ?? null,
 			});
 		} else if (args.action === 'fill' && args.selector) {
 			verified.push({
 				action: 'fill',
 				selector: args.selector,
 				value: args.value ?? null,
+				frame: args.frame ?? null,
 			});
 		} else if (args.action === 'press' && args.key) {
 			verified.push({
 				action: 'press',
 				selector: args.selector ?? null,
 				key: args.key,
+				frame: args.frame ?? null,
 			});
 		} else if (
 			args.action === 'wait' &&
@@ -243,6 +263,7 @@ function collectVerifiedSelectorsThisRun(
 				action: 'wait',
 				selector: args.selector,
 				state: args.value,
+				frame: args.frame ?? null,
 			});
 		}
 	}
@@ -259,23 +280,27 @@ function summarizeVerifiedSelectors(steps: AgentStep[]): string {
 
 	return verified
 		.map(entry => {
+			const inFrame = entry.frame ? ` inside frame ${entry.frame}` : '';
+
 			switch (entry.action) {
 				case 'click':
-					return `- click: ${entry.selector}`;
+					return `- click: ${entry.selector}${inFrame}`;
 				case 'hover':
-					return `- hover: ${entry.selector}`;
+					return `- hover: ${entry.selector}${inFrame}`;
 				case 'fill':
-					return `- fill: ${entry.selector} = ${JSON.stringify(entry.value)}`;
+					return `- fill: ${entry.selector} = ${JSON.stringify(
+						entry.value,
+					)}${inFrame}`;
 				case 'selectOption':
 					return `- selectOption: ${entry.selector} = ${JSON.stringify(
 						entry.value,
-					)}`;
+					)}${inFrame}`;
 				case 'press':
 					return entry.selector
-						? `- press: "${entry.key}" on ${entry.selector}`
-						: `- press: "${entry.key}" (global, no element focused)`;
+						? `- press: "${entry.key}" on ${entry.selector}${inFrame}`
+						: `- press: "${entry.key}" (global, no element focused)${inFrame}`;
 				case 'wait':
-					return `- wait: ${entry.selector} until ${entry.state}`;
+					return `- wait: ${entry.selector} until ${entry.state}${inFrame}`;
 			}
 		})
 		.join('\n');
@@ -289,9 +314,12 @@ function summarizeVerifiedSelectors(steps: AgentStep[]): string {
 export function summarizeProjectMap(
 	projectMap: ProjectMap | null,
 	extraTestFiles: string[],
+	isBlind = false,
 ): string {
 	if (!projectMap) {
-		return 'No project index available yet (run /scan first for a list of known routes and components) — you will need to find files by informed guesswork.';
+		return isBlind
+			? 'No project index — this is a blind-mode project with no local source at all. There is nothing to scan and nothing to read; ground everything in what browser_action actually shows you.'
+			: 'No project index available yet (run /scan first for a list of known routes and components) — you will need to find files by informed guesswork.';
 	}
 
 	const routes = projectMap.routes.map(
@@ -425,9 +453,16 @@ Your job: given a description of one or more features to test, write a Playwrigh
 
 If the prompt describes multiple distinct features, group the features according to the cateogories as there maybe sub-features within a single feature. Group those sub-feature in a single test file — do not combine multiple features into a single file. This keeps a repair cheap (you only need to resend the one file you're fixing, not every feature's test code) and keeps a failure in one feature from blocking the others. Use run_test's filePath argument to run and repair one feature's file independently of the others.
 
-${summarizeProjectMap(projectMap, testsWrittenThisRun)}
+${summarizeProjectMap(
+	projectMap,
+	testsWrittenThisRun,
+	context.orbitConfig.blind,
+)}
 
-Files already confirmed by feature (from past runs — read the file directly if what you need is listed here, instead of exploring blind):
+${
+	context.orbitConfig.blind
+		? "There is no read_file tool in this run and no project index — this is a blind-mode project with no local source at all. Every feature you test has to be discovered and verified entirely through browser_action: navigate, look at what actually rendered, and derive selectors from that, never from memory of how this kind of app 'usually' works.\n"
+		: `Files already confirmed by feature (from past runs — read the file directly if what you need is listed here, instead of exploring blind):
 ${knownClassifications}
 
 Use the project index above to find the right file to read before writing selectors — prefer it over guessing paths. If a feature you're asked to test isn't listed anywhere, use read_file to explore starting from a route or component that seems related.
@@ -435,6 +470,7 @@ ${
 	hasExplainSymbol
 		? "\nA code knowledge graph is available for this project (explain_symbol). When you start a NEW feature, before any read_file calls, call explain_symbol on the most relevant entry point — the route or component the project index above points to — to see what it's connected to (other components, API handlers, shared utilities). Use that map to decide what actually needs reading, rather than opening the first plausible file and expanding your understanding one read_file call at a time. Keep doing this as you go, too: call explain_symbol on any further route, component, or function BEFORE your first read_file call on it, every time — this is your default first move for anything you haven't already explored this run, not something to reach for only once you notice you need it. It's far cheaper than opening a file and often tells you everything you need (what it imports, what calls it, where it lives) without a read at all. Only fall back to read_file once you actually need to see the real code — exact markup, prop names, JSX structure, selectors — not just its relationships to the rest of the codebase.\n"
 		: ''
+}`
 }
 Project memory (read this before writing anything — avoid repeating documented failure patterns and follow documented conventions):
 
@@ -453,10 +489,12 @@ Exploring with a real browser (browser_action): the app runs at ${
 		context.orbitConfig.baseUrl
 	} — navigate accepts a path relative to that (e.g. "/SignUp") or a full URL. read_file shows you source code, not what actually renders — runtime data, conditional branches, and component-library internals can all make the real page different from what the source suggests. Use browser_action to ground your selectors and expected outcomes in what you actually observe, especially for anything read_file can't tell you: content behind a login, a multi-step flow with no direct URL per step, or a state that only appears after an interaction (a toast, a modal, a cart badge). navigate/click/fill already return the resulting accessibility snapshot whenever the page actually changed — you don't need to separately call snapshot after them. Call snapshot on its own only to re-check the current state without taking a new action. Call reset when you start exploring a NEW feature (fresh cookies/storage) — do not call it between pages within the same feature's flow, since a multi-page journey (e.g. cart -> checkout -> payment) depends on staying in the same browser context throughout. A sequence where a later step only makes sense because of what an earlier step just did — reset a password, then verify you can log in with that new password; sign up, then check the account shows as unactivated — is ONE feature, not two, even if the prompt describes it as a list of things to do in order. Only reset when moving to something genuinely independent of what you just verified, not for every checkpoint within one continuous journey. Keep in mind browser_action shows you what actually happens, not what's supposed to happen — if what you observe contradicts the feature description you were given or a documented convention in project memory, treat that as a possible application bug rather than writing an assertion that simply matches the broken behavior.
 
+If a piece of UI you need genuinely doesn't appear in the accessibility snapshot at all — not "hard to find," but structurally absent — it may be rendered inside an <iframe> (a payment widget, an embedded third-party form, a legacy admin panel bolted on without source access). The top-level snapshot does not descend into an iframe's own document. Use browser_action's \`frame\` argument in that case: pass a locator for the iframe element itself (e.g. role=iframe[name="payment"], or a CSS selector you found via a plain snapshot of the outer page), and \`selector\` then resolves inside that frame instead of the main page. Call "snapshot" with \`frame\` set first to see what's actually inside before acting on it — don't guess at what an iframe contains. Leave \`frame\` null for everything else; most apps have no iframes and this should be rare.
+
 Selectors already confirmed to work this run, from your own successful browser_action click/fill calls against the real live page:
 ${summarizeVerifiedSelectors(steps)}
 
-When you write_test_file, reuse these exact strings for anything they cover — do not re-derive a similar-looking selector from memory or from a general convention of how this kind of element "usually" works. A selector you already confirmed resolves uniquely on the real page is more trustworthy than one you reconstruct afterward, and the two are not guaranteed to match — reconstructing from memory instead of reusing what you verified is exactly how a past run wrote a selector that hung forever even though the equivalent live click had worked moments earlier. If a step in the test isn't covered by anything in this list, that means you wrote or ran the test without verifying that step live first — go back and verify it with browser_action before writing it, rather than guessing.
+When you write_test_file, reuse these exact strings for anything they cover — do not re-derive a similar-looking selector from memory or from a general convention of how this kind of element "usually" works. A selector you already confirmed resolves uniquely on the real page is more trustworthy than one you reconstruct afterward, and the two are not guaranteed to match — reconstructing from memory instead of reusing what you verified is exactly how a past run wrote a selector that hung forever even though the equivalent live click had worked moments earlier. If a step in the test isn't covered by anything in this list, that means you wrote or ran the test without verifying that step live first — go back and verify it with browser_action before writing it, rather than guessing. For an entry marked "inside frame X", write it in the test file as \`page.frameLocator(X).locator(selector)\` — a plain \`page.locator(selector)\` only searches the main page's document and will never find an element that lives inside an iframe, even if the exact same selector string worked live via browser_action's \`frame\` argument.
 
 A live "press" that worked can still be a no-op once written down — verify with wait, not just latency. Pressing Enter to confirm a highlighted autocomplete/dropdown suggestion only works once that suggestion has actually finished loading and become the active one; during YOUR OWN exploration there's real time between one browser_action call and the next (each one's own settle, plus your own reasoning time), which is often enough for that to happen without you noticing it was timing-dependent at all. A written test has none of that gap — click() and press('Enter') run back-to-back with nothing in between — so a press that looked instant and reliable while you were exploring can silently select nothing once it's replayed at full speed. Confirmed live: a past run's exploration genuinely selected a customer this way and the resulting record really saved; the written test copied the identical click-then-press sequence and Enter fired before anything was highlighted, so the field stayed empty, a required-field validation silently blocked the save, and the test hung waiting for a network response that was never going to come. Before writing (or, better, before even relying on) a bare press('Enter') to confirm a selection — in exploration or in the file you write — use wait to confirm an option is actually visible/ready first, and write that same wait into the test file immediately before the press, not just the press by itself.
 
@@ -464,7 +502,11 @@ Proving persistence, not just a clean-looking form: when a feature creates, save
 
 Rules:
 - Prefer Playwright and role-based selectors (getByRole, getByLabel, getByText).
-- Use read_file to look at the actual markup of a component or route before writing selectors against it — do not guess. Use browser_action when you need to see what's actually rendered, not just what the source suggests.
+${
+	context.orbitConfig.blind
+		? '- There is no source to read in this run — derive every selector from browser_action, verified live, never from a guess at how this kind of element "usually" works.'
+		: "- Use read_file to look at the actual markup of a component or route before writing selectors against it — do not guess. Use browser_action when you need to see what's actually rendered, not just what the source suggests."
+}
 - Before asserting on the URL or page a user is redirected to after an action (a submit, a click), verify the actual destination with browser_action rather than inferring it from a component's name or file location — a component's name is not proof of its route. Guessing this costs a wasted repair attempt when it's wrong; browser_action gets you the real answer up front.
 - write_test_file only accepts paths inside the project's configured test directory (${
 		context.orbitConfig.testDir
@@ -555,16 +597,30 @@ export async function runTestingAgent(
 		hasConfirmedOutcome: feature => confirmedFeaturesRef.current.has(feature),
 	};
 
-	// Computed once, not per-turn — scanMode and the graph's presence on
-	// disk don't change mid-run. explain_symbol is only ever offered to the
-	// model when graphify actually produced a graph for this project;
-	// otherwise the tool doesn't exist as far as the model is concerned,
-	// rather than existing and failing every call.
-	const activeToolRegistry: ToolDefinition[] =
+	// Computed once, not per-turn — scanMode, the graph's presence on disk,
+	// and blind mode don't change mid-run. explain_symbol is only ever
+	// offered to the model when graphify actually produced a graph for this
+	// project; otherwise the tool doesn't exist as far as the model is
+	// concerned, rather than existing and failing every call. read_file is
+	// removed entirely for a blind project — there is no local source to
+	// read, and leaving it available would let the model shortcut past live
+	// verification by reading its own previously-generated test specs
+	// directly instead of re-confirming a selector via browser_action
+	// first, which is exactly the gap the verified-selector discipline
+	// elsewhere in this file exists to close. explain_symbol needs no
+	// equivalent carve-out: blind mode never sets scanMode to 'graphify',
+	// so hasGraphify below is already false for it.
+	const hasGraphify =
 		context.orbitConfig.scanMode === 'graphify' &&
-		graphifyGraphExists(context.projectRoot)
-			? [...toolRegistry, explainSymbolTool]
-			: toolRegistry;
+		graphifyGraphExists(context.projectRoot);
+
+	const baseToolRegistry = context.orbitConfig.blind
+		? toolRegistry.filter(tool => tool.name !== 'read_file')
+		: toolRegistry;
+
+	const activeToolRegistry: ToolDefinition[] = hasGraphify
+		? [...baseToolRegistry, explainSymbolTool]
+		: baseToolRegistry;
 
 	let previousResponseId: string | undefined;
 	let nextInput: string | ResponseInputItem[] = prompt;
@@ -608,7 +664,7 @@ export async function runTestingAgent(
 					memory,
 					knownClassifications,
 					testsWrittenThisRun,
-					activeToolRegistry !== toolRegistry,
+					hasGraphify,
 					steps,
 				),
 				input: nextInput,

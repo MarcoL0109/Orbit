@@ -107,6 +107,21 @@ export async function runTestCommand(
 
 			if (alreadyReachable) {
 				context.markEnvironmentReady(context.project.root);
+			} else if (context.project.blind) {
+				// Blind mode never tries to discover or start an environment
+				// — there is no source here for a setup agent to read or run
+				// commands from (projectRoot is Orbit's own empty
+				// workspace, not the target app), and doing so anyway would
+				// be exactly the kind of unattended shell-command execution
+				// blind mode exists to avoid. Fail fast and clearly instead.
+				reportError(context.setMessages, {
+					kind: 'blind-target-unreachable',
+					baseUrl: orbitConfig.baseUrl,
+				});
+				return {
+					ranTest: false,
+					reason: `${orbitConfig.baseUrl} is not reachable`,
+				};
 			} else {
 				// Give the user a chance to hand-write the startup sequence
 				// before defaulting to AI discovery — they usually already
@@ -256,32 +271,35 @@ export async function runTestCommand(
 		// Keep the project index fresh before every run — cheap in
 		// practice since scanProject skips unchanged files by mtime/size,
 		// and non-fatal if it fails: the agent still works from whatever
-		// map (if any) was already on disk.
-		try {
-			context.setAgentActivity('Scanning project for changes...');
-			const {projectMap, graphifyOutcome} = await scanProjectWithModeSelection(
-				context.project.root,
-				{
-					requestApproval: context.requestApproval,
-					requestScanMode: context.requestScanMode,
-					setMessages: context.setMessages,
-				},
-			);
-			writeProjectMap(context.project.root, projectMap);
+		// map (if any) was already on disk. Skipped entirely for a blind
+		// project: there is no local source to scan, and running it would
+		// at best index Orbit's own generated files, at worst prompt the
+		// user for a scan mode (regex/graphify) that has no meaning here.
+		if (!context.project.blind) {
+			try {
+				context.setAgentActivity('Scanning project for changes...');
+				const {projectMap, graphifyOutcome} =
+					await scanProjectWithModeSelection(context.project.root, {
+						requestApproval: context.requestApproval,
+						requestScanMode: context.requestScanMode,
+						setMessages: context.setMessages,
+					});
+				writeProjectMap(context.project.root, projectMap);
 
-			const graphifyMessage = graphifyOutcomeMessage(graphifyOutcome);
-			if (graphifyMessage) {
-				context.setMessages(previous => [
-					...previous,
-					{role: 'agent', ...graphifyMessage},
-				]);
+				const graphifyMessage = graphifyOutcomeMessage(graphifyOutcome);
+				if (graphifyMessage) {
+					context.setMessages(previous => [
+						...previous,
+						{role: 'agent', ...graphifyMessage},
+					]);
+				}
+			} catch (error) {
+				reportError(context.setMessages, {
+					kind: 'unexpected',
+					action: 'Pre-test project scan',
+					cause: error,
+				});
 			}
-		} catch (error) {
-			reportError(context.setMessages, {
-				kind: 'unexpected',
-				action: 'Pre-test project scan',
-				cause: error,
-			});
 		}
 
 		context.setAgentActivity('Analyzing the request...');

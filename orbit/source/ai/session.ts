@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {resolveConfiguredDir, type OrbitConfig} from '../init/config.js';
+import {getOrbitDir} from '../init/orbitDir.js';
 import type {AgentRunResult} from './agent.js';
 import type {FeatureResult} from './tools/reportResult.js';
 
@@ -9,7 +10,7 @@ export function writeAgentSession(
 	prompt: string,
 	result: AgentRunResult,
 ): string {
-	const sessionsDir = path.join(projectRoot, '.orbit', 'sessions');
+	const sessionsDir = path.join(getOrbitDir(projectRoot), 'sessions');
 	fs.mkdirSync(sessionsDir, {recursive: true});
 
 	const fileName = `${new Date().toISOString().replace(/[:.]/g, '-')}.json`;

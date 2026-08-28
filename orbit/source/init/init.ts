@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {OrbitConfig} from './config.js';
+import {NORMAL_ORBIT_DIR_NAME, BLIND_ORBIT_DIR_NAME} from './orbitDir.js';
 
 type InitOrbitProjectOptions = {
 	projectRoot: string;
@@ -8,6 +9,11 @@ type InitOrbitProjectOptions = {
 	framework?: string;
 	packageManager?: string;
 	testFramework?: string;
+	// Blind mode: projectRoot is an Orbit-owned workspace, not a detected
+	// codebase — there's no dev server or docker-compose to find there, and
+	// no repo for testDir/manualTestDir to stay visible alongside, so they
+	// nest under .orbit/ instead of sitting as a sibling of it.
+	blind?: {targetUrl: string};
 };
 
 export type InitFileAction = {
@@ -212,11 +218,21 @@ export function initOrbitProject({
 	framework,
 	packageManager,
 	testFramework,
+	blind,
 }: InitOrbitProjectOptions) {
 	const now = new Date().toISOString();
-	const dockerCompose = detectDockerCompose(projectRoot);
+	const dockerCompose = blind
+		? {file: null, hasHealthchecks: false}
+		: detectDockerCompose(projectRoot);
 
-	const orbitDir = path.join(projectRoot, '.orbit');
+	// The one place this name is actually decided — every other reader/
+	// writer of a project's Orbit folder resolves it via getOrbitDir
+	// instead of assuming '.orbit', which is what lets this differ per
+	// project without touching those call sites too. See orbitDir.ts.
+	const orbitDir = path.join(
+		projectRoot,
+		blind ? BLIND_ORBIT_DIR_NAME : NORMAL_ORBIT_DIR_NAME,
+	);
 	const indexDir = path.join(orbitDir, 'index');
 	const memoryDir = path.join(orbitDir, 'memory');
 	const sessionsDir = path.join(orbitDir, 'sessions');
@@ -241,20 +257,24 @@ export function initOrbitProject({
 		writeJsonIfMissing(projectRoot, path.join(orbitDir, 'config.json'), {
 			approvalMode: 'ask',
 			defaultBrowser: 'chromium',
-			baseUrl: `http://localhost:${detectDevServerPort(
-				projectRoot,
-				dockerCompose,
-			)}`,
-			devCommands: dockerCompose.file ? ['docker compose up'] : [],
+			baseUrl: blind
+				? blind.targetUrl
+				: `http://localhost:${detectDevServerPort(projectRoot, dockerCompose)}`,
+			devCommands: blind ? [] : dockerCompose.file ? ['docker compose up'] : [],
 			testCommand: null,
-			testDir: 'Orbit-test/e2e',
-			manualTestDir: 'Orbit-test/user_input_test',
+			testDir: blind
+				? `${BLIND_ORBIT_DIR_NAME}/Orbit-test/e2e`
+				: 'Orbit-test/e2e',
+			manualTestDir: blind
+				? `${BLIND_ORBIT_DIR_NAME}/Orbit-test/user_input_test`
+				: 'Orbit-test/user_input_test',
 			writeMode: 'ask',
 			maxRepairAttempts: 3,
 			dockerComposeFile: dockerCompose.file,
 			dockerComposeHasHealthchecks: dockerCompose.hasHealthchecks,
 			scanMode: null,
 			environmentSetupRoot: null,
+			blind: Boolean(blind),
 		} satisfies OrbitConfig),
 
 		writeTextIfMissing(

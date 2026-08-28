@@ -2,30 +2,53 @@ import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import {getOrbitDir} from '../init/orbitDir.js';
 
 export type BrowserWorkerCommand =
 	| {action: 'navigate'; url: string}
-	| {action: 'click'; selector: string}
-	| {action: 'fill'; selector: string; value: string}
+	| {action: 'click'; selector: string; frame: string | null}
+	| {action: 'fill'; selector: string; value: string; frame: string | null}
 	// label, not value — selects a native <select>'s option by its visible
 	// text. Matches how the model actually perceives options (it only ever
 	// sees rendered labels via the accessibility snapshot, never the raw
 	// value attribute, which can be arbitrary — confirmed live against a
 	// real project where a native select's own value attribute was a
 	// literal escaped-quoted string, nothing a model should have to guess).
-	| {action: 'selectOption'; selector: string; label: string}
+	| {
+			action: 'selectOption';
+			selector: string;
+			label: string;
+			frame: string | null;
+	  }
 	// selector: null sends the key to the page globally (e.g. Escape to
 	// close a modal with nothing specific focused); non-null presses it on
 	// that one focused element (e.g. Enter after filling an autocomplete).
-	| {action: 'press'; selector: string | null; key: string}
-	| {action: 'hover'; selector: string}
+	| {
+			action: 'press';
+			selector: string | null;
+			key: string;
+			frame: string | null;
+	  }
+	| {action: 'hover'; selector: string; frame: string | null}
 	// Explicit wait for one element's state, separate from actAndReport's
 	// own blanket settle() — that one's a generic, bounded-time nudge after
 	// every action; this is for when the model specifically doesn't trust
 	// that was enough and wants to wait for one particular element instead
 	// of proceeding blind.
-	| {action: 'wait'; selector: string; state: 'visible' | 'hidden'}
-	| {action: 'snapshot'}
+	| {
+			action: 'wait';
+			selector: string;
+			state: 'visible' | 'hidden';
+			frame: string | null;
+	  }
+	// frame targets an <iframe> element (a Playwright locator string for
+	// the iframe itself) so selector resolves inside that frame's own
+	// document instead of the main page — the top-level page.locator()
+	// never descends into an iframe's content, and the top-level
+	// ariaSnapshot doesn't show what's rendered inside one either, which is
+	// exactly why 'snapshot' also accepts frame: to inspect a frame's own
+	// content directly instead of guessing what's inside it.
+	| {action: 'snapshot'; frame: string | null}
 	| {action: 'reset'}
 	| {action: 'close'};
 
@@ -223,8 +246,15 @@ async function drainCapturedEvents() {
   };
 }
 
-async function snapshotOf(p) {
-  return p.locator('body').ariaSnapshot();
+// frameLocator() and the page itself expose the same .locator() API, so
+// callers that don't care whether they're scoped to a frame can just ask
+// for the right root once and use it identically either way.
+function targetRoot(p, frameSelector) {
+  return frameSelector ? p.frameLocator(frameSelector) : p;
+}
+
+async function snapshotOf(p, frameSelector) {
+  return targetRoot(p, frameSelector).locator('body').ariaSnapshot();
 }
 
 // Best-effort settle before reading the DOM — actions that trigger an SPA
@@ -243,7 +273,16 @@ async function settle(p) {
   await new Promise((resolve) => setTimeout(resolve, 150));
 }
 
-async function actAndReport(action) {
+// frameSelector, when set, scopes both the action and its resulting
+// snapshot to that <iframe>'s own document via targetRoot(). The page-level
+// changed/lastSnapshot diffing (designed around the main page) is
+// deliberately left untouched by a frame-scoped action — a frame's content
+// isn't guaranteed to show up in the top-level ariaSnapshot at all, so
+// diffing across that boundary would be meaningless. A frame-scoped action
+// always returns its frame's current snapshot instead, since the model
+// asked to act inside a frame specifically because it needs to see what's
+// in there.
+async function actAndReport(action, frameSelector) {
   const p = await ensurePage();
   // Cleared right before the action, not just drained after — anything
   // left over from a PREVIOUS action has already been reported once and
@@ -253,10 +292,25 @@ async function actAndReport(action) {
   pendingWebSocketMessages = [];
   await action(p);
   await settle(p);
-  const snapshot = await snapshotOf(p);
+  const {apiCalls, consoleErrors, webSocketMessages} = await drainCapturedEvents();
+
+  if (frameSelector) {
+    const snapshot = await snapshotOf(p, frameSelector);
+    return {
+      ok: true,
+      url: p.url(),
+      title: await p.title(),
+      changed: true,
+      snapshot,
+      apiCalls,
+      consoleErrors,
+      webSocketMessages,
+    };
+  }
+
+  const snapshot = await snapshotOf(p, null);
   const changed = snapshot !== lastSnapshot;
   lastSnapshot = snapshot;
-  const {apiCalls, consoleErrors, webSocketMessages} = await drainCapturedEvents();
   return {
     ok: true,
     url: p.url(),
@@ -272,29 +326,31 @@ async function actAndReport(action) {
 async function handle(command) {
   switch (command.action) {
     case 'navigate':
-      return actAndReport((p) => p.goto(command.url));
+      return actAndReport((p) => p.goto(command.url), null);
     case 'click':
-      return actAndReport((p) => p.locator(command.selector).click());
+      return actAndReport((p) => targetRoot(p, command.frame).locator(command.selector).click(), command.frame);
     case 'fill':
-      return actAndReport((p) => p.locator(command.selector).fill(command.value));
+      return actAndReport((p) => targetRoot(p, command.frame).locator(command.selector).fill(command.value), command.frame);
     case 'selectOption':
-      return actAndReport((p) => p.locator(command.selector).selectOption({label: command.label}));
+      return actAndReport((p) => targetRoot(p, command.frame).locator(command.selector).selectOption({label: command.label}), command.frame);
     case 'press':
       return actAndReport((p) =>
         command.selector
-          ? p.locator(command.selector).press(command.key)
-          : p.keyboard.press(command.key)
+          ? targetRoot(p, command.frame).locator(command.selector).press(command.key)
+          : p.keyboard.press(command.key),
+        command.frame
       );
     case 'hover':
-      return actAndReport((p) => p.locator(command.selector).hover());
+      return actAndReport((p) => targetRoot(p, command.frame).locator(command.selector).hover(), command.frame);
     case 'wait':
       return actAndReport((p) =>
-        p.locator(command.selector).waitFor({state: command.state, timeout: 10000})
+        targetRoot(p, command.frame).locator(command.selector).waitFor({state: command.state, timeout: 10000}),
+        command.frame
       );
     case 'snapshot': {
       const p = await ensurePage();
-      const snapshot = await snapshotOf(p);
-      lastSnapshot = snapshot;
+      const snapshot = await snapshotOf(p, command.frame);
+      if (!command.frame) lastSnapshot = snapshot;
       // Drained here too, not just in actAndReport — otherwise anything
       // that happened between the last action and this snapshot (e.g. an
       // async request that only failed after the page had already
@@ -360,7 +416,7 @@ export function spawnBrowserWorker(
 	defaultBrowser: string,
 	baseUrl: string,
 ): BrowserWorkerHandle {
-	const indexDir = path.join(projectRoot, '.orbit', 'index');
+	const indexDir = path.join(getOrbitDir(projectRoot), 'index');
 	fs.mkdirSync(indexDir, {recursive: true});
 
 	const workerPath = path.join(indexDir, 'browser-worker.mjs');

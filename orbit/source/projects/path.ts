@@ -6,6 +6,9 @@ const IGNORE_DIRS = new Set([
 	'node_modules',
 	'.git',
 	'.orbit',
+	// A blind-mode project's own Orbit folder (see orbitDir.ts) — never
+	// walked as app source, same reason '.orbit' is skipped above.
+	'orbit',
 	'dist',
 	'build',
 	'coverage',

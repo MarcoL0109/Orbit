@@ -25,6 +25,7 @@ function fakeConfig(overrides: Partial<OrbitConfig> = {}): OrbitConfig {
 		dockerComposeHasHealthchecks: false,
 		scanMode: null,
 		environmentSetupRoot: null,
+		blind: false,
 		...overrides,
 	};
 }

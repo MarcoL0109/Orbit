@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import type {ProjectInfo} from '../commands/context.js';
 import {removeKnownProject} from '../registry/knownProjects.js';
+import {getOrbitDir} from './orbitDir.js';
 
 export type DeinitResponse = {
 	ok: boolean;
@@ -30,7 +31,7 @@ export function getProjectPath(project: ProjectInfo | null): DeinitResponse {
 }
 
 export function deinitLocalContext(path: string) {
-	fs.rmSync(`${path}/.orbit`, {recursive: true, force: true});
+	fs.rmSync(getOrbitDir(path), {recursive: true, force: true});
 }
 
 export function deinitGlobalContext(

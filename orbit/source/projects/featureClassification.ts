@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {getOrbitDir} from '../init/orbitDir.js';
 
 export type FeatureClassificationEntry = {
 	checksum: string;
@@ -14,8 +15,7 @@ export type FeatureClassificationFile = {
 
 function getFeatureClassificationPath(projectRoot: string): string {
 	return path.join(
-		projectRoot,
-		'.orbit',
+		getOrbitDir(projectRoot),
 		'index',
 		'feature-classification.json',
 	);

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {walkProjectFiles} from './path.js';
+import {getOrbitDir} from '../init/orbitDir.js';
 import {
 	buildChecksumsFile,
 	checksumFromContent,
@@ -700,7 +701,7 @@ function normalizeFeatureName(value: string) {
 }
 
 function getProjectMapPath(projectRoot: string) {
-	return path.join(projectRoot, '.orbit', 'index', 'project-map.json');
+	return path.join(getOrbitDir(projectRoot), 'index', 'project-map.json');
 }
 
 export function readProjectMap(projectRoot: string): ProjectMap | null {

@@ -21,6 +21,11 @@ export type ProjectInfo = {
 	packageManager?: string;
 	testFramework?: string;
 	hasOrbitFolder?: boolean;
+	// Blind mode: root is Orbit's own storage workspace, not a detected
+	// codebase, and targetUrl is the live app Orbit explores via the
+	// browser instead of reading source for.
+	blind?: boolean;
+	targetUrl?: string;
 };
 
 export type CommandContext = {
@@ -69,6 +74,14 @@ export type CommandContext = {
 		options: Array<{label: string; value: string}>,
 	) => Promise<string>;
 	setAgentActivity: React.Dispatch<React.SetStateAction<string | null>>;
+	// The blind-mode storage-path confirmation step: shown when /blind is
+	// given a URL that isn't already a known blind project, pre-filled with
+	// a suggested workspace path the user can accept or edit before
+	// anything is written — same shape as /init's checkInitPath/
+	// confirmInitPath, just for a URL instead of a filesystem root.
+	setCheckBlindPath: React.Dispatch<React.SetStateAction<boolean>>;
+	setConfirmBlindPath: React.Dispatch<React.SetStateAction<string>>;
+	setPendingBlindUrl: React.Dispatch<React.SetStateAction<string>>;
 	// Keyed by project root, not a single flag — switching projects (/switch)
 	// shouldn't let one project's confirmed-ready state apply to another.
 	// Set once per project per session; never cleared or re-checked after

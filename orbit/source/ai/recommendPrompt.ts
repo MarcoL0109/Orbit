@@ -6,6 +6,7 @@ import {readProjectMemory} from '../init/memory.js';
 import {computeCoverage, formatCoverageSummary} from '../projects/coverage.js';
 import {createOpenAIClient, type ResponsesClient} from './client.js';
 import {summarizeProjectMap, summarizeMemory} from './agent.js';
+import {getOrbitDir} from '../init/orbitDir.js';
 
 type StoredSession = {
 	prompt: string;
@@ -16,7 +17,7 @@ type StoredSession = {
 // Sessions are named by ISO timestamp (see writeAgentSession), so a plain
 // lexical sort is also a chronological one — no need to stat/parse dates.
 function readLatestSession(projectRoot: string): StoredSession | null {
-	const sessionsDir = path.join(projectRoot, '.orbit', 'sessions');
+	const sessionsDir = path.join(getOrbitDir(projectRoot), 'sessions');
 	if (!fs.existsSync(sessionsDir)) return null;
 
 	const files = fs
