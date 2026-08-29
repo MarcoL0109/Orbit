@@ -72,6 +72,12 @@ function fakeContext(
 		hasConfirmedOutcome() {
 			throw new Error('hasConfirmedOutcome should not be reached');
 		},
+		getCurrentExplorationNodeId() {
+			throw new Error('getCurrentExplorationNodeId should not be reached');
+		},
+		setCurrentExplorationNodeId() {
+			throw new Error('setCurrentExplorationNodeId should not be reached');
+		},
 	};
 }
 

@@ -1,5 +1,11 @@
 import type {BrowserWorkerResponse} from '../browserWorker.js';
-import type {ToolDefinition, ToolResult} from './types.js';
+import {
+	readExplorationGraph,
+	writeExplorationGraph,
+	recordTransition,
+	type ExplorationAction,
+} from '../explorationGraph.js';
+import type {ToolContext, ToolDefinition, ToolResult} from './types.js';
 
 export type BrowserActionArgs = {
 	action:
@@ -25,6 +31,35 @@ function toToolResult(
 	return response.ok
 		? {ok: true, data: response}
 		: {ok: false, error: response.error};
+}
+
+// Builds the exploration graph as a passive side effect of ordinary
+// exploration — the model never sees a dedicated tool for this, it just
+// explores normally and the graph accumulates underneath (see
+// explorationGraph.ts). Blind-only: normal projects have read_file/
+// graphify as real structural reference already, so this exists
+// specifically to give blind mode something it otherwise has none of.
+// Only actions capable of returning `changed: true` are worth recording —
+// "snapshot" is a passive re-check, not a transition.
+function recordExplorationIfApplicable(
+	context: ToolContext,
+	action: ExplorationAction,
+	response: BrowserWorkerResponse,
+): void {
+	if (!context.orbitConfig.blind) return;
+	if (!response.ok || !response.changed || !response.snapshot) return;
+
+	const graph = readExplorationGraph(context.projectRoot);
+	const {graph: updated, toNodeId} = recordTransition(graph, {
+		fromNodeId: context.getCurrentExplorationNodeId(),
+		action,
+		url: response.url ?? '',
+		title: response.title ?? '',
+		snapshot: response.snapshot,
+	});
+
+	writeExplorationGraph(context.projectRoot, updated);
+	context.setCurrentExplorationNodeId(toNodeId);
 }
 
 // 'close' is deliberately not an agent-facing action — the browser's
@@ -89,21 +124,32 @@ export const browserActionTool: ToolDefinition<
 		switch (args.action) {
 			case 'navigate': {
 				if (!args.url) return {ok: false, error: '"navigate" requires a url'};
-				return toToolResult(
-					await worker.send({action: 'navigate', url: args.url}),
+				const response = await worker.send({
+					action: 'navigate',
+					url: args.url,
+				});
+				recordExplorationIfApplicable(
+					context,
+					{type: 'navigate', selector: null, value: args.url},
+					response,
 				);
+				return toToolResult(response);
 			}
 
 			case 'click': {
 				if (!args.selector)
 					return {ok: false, error: '"click" requires a selector'};
-				return toToolResult(
-					await worker.send({
-						action: 'click',
-						selector: args.selector,
-						frame: args.frame,
-					}),
+				const response = await worker.send({
+					action: 'click',
+					selector: args.selector,
+					frame: args.frame,
+				});
+				recordExplorationIfApplicable(
+					context,
+					{type: 'click', selector: args.selector, value: null},
+					response,
 				);
+				return toToolResult(response);
 			}
 
 			case 'fill': {
@@ -111,14 +157,18 @@ export const browserActionTool: ToolDefinition<
 					return {ok: false, error: '"fill" requires a selector'};
 				if (args.value === null)
 					return {ok: false, error: '"fill" requires a value'};
-				return toToolResult(
-					await worker.send({
-						action: 'fill',
-						selector: args.selector,
-						value: args.value,
-						frame: args.frame,
-					}),
+				const response = await worker.send({
+					action: 'fill',
+					selector: args.selector,
+					value: args.value,
+					frame: args.frame,
+				});
+				recordExplorationIfApplicable(
+					context,
+					{type: 'fill', selector: args.selector, value: args.value},
+					response,
 				);
+				return toToolResult(response);
 			}
 
 			case 'selectOption': {
@@ -130,38 +180,50 @@ export const browserActionTool: ToolDefinition<
 						error:
 							'"selectOption" requires a value (the option\'s visible label)',
 					};
-				return toToolResult(
-					await worker.send({
-						action: 'selectOption',
-						selector: args.selector,
-						label: args.value,
-						frame: args.frame,
-					}),
+				const response = await worker.send({
+					action: 'selectOption',
+					selector: args.selector,
+					label: args.value,
+					frame: args.frame,
+				});
+				recordExplorationIfApplicable(
+					context,
+					{type: 'selectOption', selector: args.selector, value: args.value},
+					response,
 				);
+				return toToolResult(response);
 			}
 
 			case 'press': {
 				if (!args.key) return {ok: false, error: '"press" requires a key'};
-				return toToolResult(
-					await worker.send({
-						action: 'press',
-						selector: args.selector,
-						key: args.key,
-						frame: args.frame,
-					}),
+				const response = await worker.send({
+					action: 'press',
+					selector: args.selector,
+					key: args.key,
+					frame: args.frame,
+				});
+				recordExplorationIfApplicable(
+					context,
+					{type: 'press', selector: args.selector, value: args.key},
+					response,
 				);
+				return toToolResult(response);
 			}
 
 			case 'hover': {
 				if (!args.selector)
 					return {ok: false, error: '"hover" requires a selector'};
-				return toToolResult(
-					await worker.send({
-						action: 'hover',
-						selector: args.selector,
-						frame: args.frame,
-					}),
+				const response = await worker.send({
+					action: 'hover',
+					selector: args.selector,
+					frame: args.frame,
+				});
+				recordExplorationIfApplicable(
+					context,
+					{type: 'hover', selector: args.selector, value: null},
+					response,
 				);
+				return toToolResult(response);
 			}
 
 			case 'wait': {
@@ -198,7 +260,14 @@ export const browserActionTool: ToolDefinition<
 					};
 				}
 
-				return toToolResult(await worker.send({action: 'reset'}));
+				const response = await worker.send({action: 'reset'});
+				// A fresh context has no current page — the next transition
+				// after this has nothing real to draw an edge from, same as
+				// the very first action of a run.
+				if (context.orbitConfig.blind) {
+					context.setCurrentExplorationNodeId(null);
+				}
+				return toToolResult(response);
 			}
 		}
 	},

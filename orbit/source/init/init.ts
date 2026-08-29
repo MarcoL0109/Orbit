@@ -277,10 +277,21 @@ export function initOrbitProject({
 			blind: Boolean(blind),
 		} satisfies OrbitConfig),
 
-		writeTextIfMissing(
-			projectRoot,
-			path.join(memoryDir, 'overview.md'),
-			`# Orbit Project Memory
+		// Neither file gets scaffolded for a blind project — both are pure
+		// human-editable templates (nothing in the agent loop ever writes
+		// back to them, unlike failures.md's recordFailureNote) that a
+		// low-touch blind workflow was never going to fill in, so they'd
+		// just sit there as permanent placeholder text. summarizeMemory's
+		// blind-mode branch replaces them with the exploration graph
+		// instead — a real, evidence-backed source built from what's
+		// actually been observed live, not a template.
+		...(blind
+			? []
+			: [
+					writeTextIfMissing(
+						projectRoot,
+						path.join(memoryDir, 'overview.md'),
+						`# Orbit Project Memory
 
 ## Overview
 
@@ -297,12 +308,12 @@ Orbit was initialized for this project on ${now}.
 - Checkout
 - Dashboard
 `,
-		),
+					),
 
-		writeTextIfMissing(
-			projectRoot,
-			path.join(memoryDir, 'decisions.md'),
-			`
+					writeTextIfMissing(
+						projectRoot,
+						path.join(memoryDir, 'decisions.md'),
+						`
 # Decisions
 
 ## Testing Strategy
@@ -312,7 +323,8 @@ Orbit was initialized for this project on ${now}.
 - Ask before creating or editing files.
 - Ask before running shell commands.
 `,
-		),
+					),
+			  ]),
 
 		writeTextIfMissing(
 			projectRoot,

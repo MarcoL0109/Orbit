@@ -51,6 +51,13 @@ export type ToolContext = {
 	// true for that feature, so asking the user isn't left to the model's
 	// own discretion about whether it feels unsure enough to bother.
 	hasConfirmedOutcome: (feature: string) => boolean;
+	// "Which exploration-graph node are we on right now" — tracked here,
+	// not persisted in the graph file itself (that's "where are we", not
+	// data worth keeping). browser_action reads and advances this on every
+	// action that changes the page, building the graph edge by edge as a
+	// side effect of ordinary exploration; see explorationGraph.ts.
+	getCurrentExplorationNodeId: () => string | null;
+	setCurrentExplorationNodeId: (id: string | null) => void;
 };
 
 // Deliberately smaller than ToolContext — the environment setup agent's

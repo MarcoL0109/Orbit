@@ -5,6 +5,10 @@ import {graphifyGraphExists} from '../projects/graphifyGraph.js';
 import {readProjectMap, type ProjectMap} from '../projects/scan.js';
 import {readProjectMemory, type ProjectMemory} from '../init/memory.js';
 import {recordUsage} from '../registry/usage.js';
+import {
+	readExplorationGraph,
+	summarizeExplorationGraph,
+} from './explorationGraph.js';
 import {readFeatureClassifications} from '../projects/featureClassification.js';
 import {checksumFromContent} from '../projects/checksum.js';
 import {createOpenAIClient, type ResponsesClient} from './client.js';
@@ -479,7 +483,19 @@ ${
 }
 Project memory (read this before writing anything — avoid repeating documented failure patterns and follow documented conventions):
 
-${summarizeMemory(memory)}
+${
+	context.orbitConfig.blind
+		? `${summarizeMemory(memory, {
+				overview: false,
+				decisions: false,
+				environment: true,
+				failures: true,
+		  })}
+
+## Exploration graph (built from live browsing on past runs against this app — a hint, not ground truth; still verify live before trusting an edge, an app can change)
+${summarizeExplorationGraph(readExplorationGraph(context.projectRoot))}`
+		: summarizeMemory(memory)
+}
 
 If a run fails because of a broken selector or similar test-side issue, you may patch that feature's test file and run it again — you have a budget of ${
 		context.orbitConfig.maxRepairAttempts
@@ -592,6 +608,8 @@ export async function runTestingAgent(
 		| 'hasExploredWithBrowser'
 		| 'hasUnconsumedManualInput'
 		| 'hasConfirmedOutcome'
+		| 'getCurrentExplorationNodeId'
+		| 'setCurrentExplorationNodeId'
 	>,
 	options: RunTestingAgentOptions = {},
 ): Promise<AgentRunResult> {
@@ -617,6 +635,13 @@ export async function runTestingAgent(
 	// own description tells it to use the same name it'll pass to
 	// report_result.
 	const confirmedFeaturesRef: {current: Set<string>} = {current: new Set()};
+	// "Where exploration currently is" for the exploration graph — reset to
+	// null on every browser_action reset (a fresh context has no page yet),
+	// otherwise advanced by browserAction.ts as it builds the graph edge by
+	// edge. Session-scoped, not persisted (see explorationGraph.ts).
+	const currentExplorationNodeIdRef: {current: string | null} = {
+		current: null,
+	};
 	const toolContext: ToolContext = {
 		...context,
 		async getBrowserWorker() {
@@ -633,6 +658,10 @@ export async function runTestingAgent(
 		hasExploredWithBrowser: () => hasUsedBrowserActionRef.current,
 		hasUnconsumedManualInput: () => manualInputPendingRef.current,
 		hasConfirmedOutcome: feature => confirmedFeaturesRef.current.has(feature),
+		getCurrentExplorationNodeId: () => currentExplorationNodeIdRef.current,
+		setCurrentExplorationNodeId: id => {
+			currentExplorationNodeIdRef.current = id;
+		},
 	};
 
 	// Computed once, not per-turn — scanMode, the graph's presence on disk,
