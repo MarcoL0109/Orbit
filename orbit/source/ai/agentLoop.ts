@@ -63,6 +63,11 @@ export async function runAgentTurn<Context>(parameters: {
 	// used yet this run"), not part of the loop's own bookkeeping.
 	onToolDispatched?: (name: string, args: unknown) => void;
 	onToolResult?: (name: string, args: unknown, result: ToolResult) => void;
+	// Every model call in this codebase goes through this one function
+	// (agent.ts, askAgent.ts, environmentSetupAgent.ts all call it), which
+	// is what makes this the single place usage can be captured for all of
+	// them at once rather than duplicated at each caller.
+	onUsage?: (usage: {inputTokens: number; outputTokens: number}) => void;
 }): Promise<AgentTurnResult> {
 	const response = await parameters.client.responses.create(
 		{
@@ -74,6 +79,13 @@ export async function runAgentTurn<Context>(parameters: {
 		},
 		{signal: parameters.signal},
 	);
+
+	if (response.usage) {
+		parameters.onUsage?.({
+			inputTokens: response.usage.input_tokens,
+			outputTokens: response.usage.output_tokens,
+		});
+	}
 
 	const functionCalls = extractFunctionCalls(response);
 	const dispatchedCalls: DispatchedCall[] = [];

@@ -42,6 +42,11 @@ import {
 	type CoverageEntry,
 } from '../projects/coverage.js';
 import {cleanupTrackedProcesses} from '../projects/processTracking.js';
+import {
+	readGlobalUsage,
+	resetGlobalUsage,
+	estimateCostUsd,
+} from '../registry/usage.js';
 import {runTestCommand} from './testCommand.js';
 import type {CommandContext} from './context.js';
 import {reportError, type ArgCountRule} from './error.js';
@@ -972,6 +977,35 @@ Available Orbit commands:
 							...report.components.map(entryMessage),
 					  ]
 					: []),
+			]);
+		},
+	},
+	// Viewing lives passively in the header box (app.tsx reads
+	// readGlobalUsage fresh every render) — this command's only job is
+	// resetting it, hence the confirmation (discards real accumulated
+	// numbers, even if low-stakes) and no separate "view" subcommand.
+	{
+		name: 'usage',
+		description: "Reset Orbit's tracked OpenAI token usage back to zero",
+		usage: '/usage',
+		argsRule: {exact: 0},
+		async handler(_args, context) {
+			const current = readGlobalUsage();
+			const sinceText = current.since
+				? `since ${new Date(current.since).toLocaleDateString()}`
+				: 'with no prior recording';
+			const approved = await context.requestApproval(
+				`Reset tracked usage (${current.inputTokens.toLocaleString()} input / ${current.outputTokens.toLocaleString()} output tokens, ~$${estimateCostUsd(
+					current,
+				).toFixed(2)}, ${sinceText}) back to zero? This cannot be undone.`,
+			);
+
+			if (!approved) return;
+
+			resetGlobalUsage();
+			context.setMessages(previous => [
+				...previous,
+				{role: 'system', content: 'Usage stats reset.', color: 'green'},
 			]);
 		},
 	},

@@ -64,6 +64,15 @@ function buildOrbitPlaywrightConfigSource(
 export default defineConfig({
   testDir: ${JSON.stringify(testDirAbsolute)},
   outputDir: ${JSON.stringify(outputDirAbsolute)},
+  // Playwright's own default (30s) is sized for a typical unit-style test
+  // against a mocked/local backend. Orbit tests a real, running app end to
+  // end — login, navigation, and every search/select round-trip all hit a
+  // real backend — so a multi-step flow can legitimately need more wall
+  // clock than that even when every step succeeds. Confirmed against a
+  // real failure: a well-formed generated test hit exactly this 30s
+  // ceiling while still correctly waiting on a save response that simply
+  // hadn't arrived yet, not because anything was actually broken.
+  timeout: 60_000,
   use: {
     baseURL: ${JSON.stringify(baseUrl)},
     trace: 'retain-on-failure',

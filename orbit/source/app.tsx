@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import React, {useEffect, useState, useRef} from 'react';
 import {Box, Text, useInput} from 'ink';
 import TextInput from 'ink-text-input';
@@ -15,9 +16,14 @@ import {
 	readGlobalProjects,
 	removeKnownProject as removeGlobalProject,
 } from './registry/knownProjects.js';
+import {readGlobalUsage, estimateCostUsd} from './registry/usage.js';
 import {initOrbitProject} from './init/init.js';
 import type {InitFileAction} from './init/init.js';
-import {deriveBlindProjectName} from './init/blindInit.js';
+import {
+	getBlindWorkspacesRoot,
+	isWithinBlindWorkspacesRoot,
+	linkSharedPlaywright,
+} from './init/blindInit.js';
 import {isReachable} from './projects/reachability.js';
 import type {
 	Message,
@@ -112,6 +118,17 @@ export function App({initialPrompt}: AppProps) {
 	// completion does, so without this the cursor is left sitting wherever
 	// it was in the middle of the completed word.
 	const [queryInputKey, setQueryInputKey] = useState<number>(0);
+	// Every submitted prompt (slash command or plain question alike, in
+	// submission order) — this session's own recall list, not persisted.
+	// Up/down arrow are safe to bind to it: ink-text-input's own key handler
+	// explicitly ignores both (see its useInput's early-return list), so
+	// unlike most keys there's no risk of it also inserting something for
+	// the same keypress.
+	const [promptHistory, setPromptHistory] = useState<string[]>([]);
+	// null = not currently recalling (live typing). A number indexes into
+	// promptHistory — up arrow decrements toward 0 (older), down arrow
+	// increments back toward null (the blank, freshly-typed state).
+	const [historyIndex, setHistoryIndex] = useState<number | null>(null);
 	const [isBooting, setIsBooting] = useState<boolean>(true);
 	const [isThinking, setIsThinking] = useState<boolean>(false);
 	const [isInitting, setIsInitting] = useState<boolean>(false);
@@ -225,6 +242,28 @@ export function App({initialPrompt}: AppProps) {
 			});
 	}
 
+	// Same condition that gates whether the main query TextInput is even
+	// rendered (see its own JSX below) — shared rather than duplicated, so
+	// up/down history recall can never fire while some other prompt
+	// (notably the project picker's own SelectInput, which uses up/down
+	// arrow itself) is the thing actually active instead.
+	const isQueryInputActive = !(
+		isBooting ||
+		selectProjectMode ||
+		selectedProjectOption === 'add' ||
+		selectedProjectOption === 'blind' ||
+		confirmDeinit ||
+		checkName ||
+		checkInitPath ||
+		checkBlindPath ||
+		isInitting ||
+		pendingApproval ||
+		pendingScanMode ||
+		pendingOutcomeConfirmation ||
+		pendingSelect ||
+		pendingInput
+	);
+
 	useInput((_input, key) => {
 		if (key.tab) {
 			const completion = getBestCommandCompletion(query);
@@ -236,6 +275,32 @@ export function App({initialPrompt}: AppProps) {
 				setQuery(recommendedPrompt);
 				setQueryInputKey(previous => previous + 1);
 			}
+		}
+
+		// ink-text-input's own key handler explicitly ignores up/down arrow
+		// (early return, no fallthrough) — confirmed from its source — so
+		// this is safe to bind without the same insert-a-stray-character
+		// risk a key like ctrl+u would have.
+		if (key.upArrow && isQueryInputActive && promptHistory.length > 0) {
+			const nextIndex =
+				historyIndex === null
+					? promptHistory.length - 1
+					: Math.max(0, historyIndex - 1);
+			setHistoryIndex(nextIndex);
+			setQuery(promptHistory[nextIndex]!);
+			setQueryInputKey(previous => previous + 1);
+		}
+
+		if (key.downArrow && isQueryInputActive && historyIndex !== null) {
+			const nextIndex = historyIndex + 1;
+			if (nextIndex >= promptHistory.length) {
+				setHistoryIndex(null);
+				setQuery('');
+			} else {
+				setHistoryIndex(nextIndex);
+				setQuery(promptHistory[nextIndex]!);
+			}
+			setQueryInputKey(previous => previous + 1);
 		}
 
 		if (key.escape && pendingInput) {
@@ -622,6 +687,8 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 
 		if (!prompt) return;
 		setQuery('');
+		setPromptHistory(previous => [...previous, prompt]);
+		setHistoryIndex(null);
 
 		setMessages(previous => [
 			...previous,
@@ -764,7 +831,28 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 		setConfirmBlindPath('');
 		setPendingBlindUrl('');
 
-		const projectName = deriveBlindProjectName(targetUrl);
+		// The confirmed leaf folder name, not deriveBlindProjectName(targetUrl)
+		// — that's only ever used to SUGGEST a starting path before the user
+		// gets a chance to edit it (see startBlindProjectFlow). Using it again
+		// here ignored any rename the user actually made, so the registry
+		// name (and picker label) silently stayed the URL slug even when the
+		// folder itself was renamed to something meaningful.
+		const projectName = path.basename(storageRoot);
+
+		// Every blind workspace has to live under the one shared root (see
+		// getBlindWorkspacesRoot) so they can all share its single
+		// Playwright/Chromium install — the confirm step still lets the user
+		// rename the leaf folder, but not relocate it elsewhere. Checked here
+		// rather than disabling the text field, so the rejection is explicit
+		// instead of the user's edit silently not taking effect.
+		if (!isWithinBlindWorkspacesRoot(storageRoot)) {
+			reportError(setMessages, {
+				kind: 'blind-storage-path-outside-root',
+				path: storageRoot,
+				root: getBlindWorkspacesRoot(),
+			});
+			return;
+		}
 
 		setIsInitting(true);
 
@@ -807,16 +895,21 @@ Tip: if this project's dev environment needs a specific startup sequence, descri
 				targetUrl,
 			});
 
-			// storageRoot is a fresh directory Orbit just created — never the
-			// target's own node_modules (there is no target codebase in blind
-			// mode) — so Playwright has to be installed here specifically, not
-			// inherited from anywhere. npm installs fine into a directory with
-			// no package.json yet; it creates a minimal one itself.
+			// Installed once at the shared root (getBlindWorkspacesRoot), not
+			// per workspace — already-ready immediately for every blind
+			// project after the first, since isPlaywrightPackageInstalled just
+			// checks whether the shared root's own node_modules already has
+			// it. This workspace's own node_modules is then a symlink onto
+			// that shared install (linkSharedPlaywright) rather than a real
+			// copy, which is what lets findPlaywrightBinary's plain
+			// <projectRoot>/node_modules check keep working unmodified.
 			let playwrightMessage: {content: string; color: string} | null = null;
 			try {
-				const playwrightOutcome = await ensurePlaywrightSetup(storageRoot, {
-					requestApproval,
-				});
+				const playwrightOutcome = await ensurePlaywrightSetup(
+					getBlindWorkspacesRoot(),
+					{requestApproval},
+				);
+				linkSharedPlaywright(storageRoot);
 				playwrightMessage = playwrightSetupOutcomeMessage(playwrightOutcome);
 			} catch (error) {
 				reportError(setMessages, {
@@ -1041,6 +1134,11 @@ Global memory updated:
 			? readOrbitConfig(project.root)
 			: null;
 
+	// Global, not project-scoped — same reasoning as orbitConfig above: read
+	// fresh every render so a call mid-run (see agentLoop.ts's onUsage)
+	// shows up here immediately, not just after the next full re-mount.
+	const usage = readGlobalUsage();
+
 	return (
 		<Box flexDirection="column">
 			<Box
@@ -1145,6 +1243,40 @@ Global memory updated:
 							<Text dimColor>
 								Run Orbit inside a project or choose a recent project.
 							</Text>
+						</Box>
+					)}
+
+					{!isBooting && (
+						<Box flexDirection="column" marginTop={1}>
+							<Text dimColor bold>
+								USAGE
+							</Text>
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Tokens (in / out)</Text>
+								</Box>
+								<Text>
+									{usage.inputTokens.toLocaleString()} /{' '}
+									{usage.outputTokens.toLocaleString()}
+								</Text>
+							</Box>
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Est. cost</Text>
+								</Box>
+								<Text>${estimateCostUsd(usage).toFixed(2)}</Text>
+							</Box>
+							<Box>
+								<Box width={24}>
+									<Text dimColor>Since</Text>
+								</Box>
+								<Text dimColor>
+									{usage.since
+										? new Date(usage.since).toLocaleDateString()
+										: 'Not tracked yet'}{' '}
+									· /usage to reset
+								</Text>
+							</Box>
 						</Box>
 					)}
 
@@ -1255,7 +1387,7 @@ Global memory updated:
 								// that actually failed should read as failed.
 								const stageMatch = STAGE_LINE_PATTERN.exec(line);
 								const stageColor = stageMatch
-									? colorForStageIcon(stageMatch[2]!)
+									? colorForStageIcon(stageMatch[1]!)
 									: undefined;
 								const lineColor = stageColor ?? message.color;
 
@@ -1284,22 +1416,7 @@ Global memory updated:
 				})}
 			</Box>
 
-			{!(
-				isBooting ||
-				selectProjectMode ||
-				selectedProjectOption === 'add' ||
-				selectedProjectOption === 'blind' ||
-				confirmDeinit ||
-				checkName ||
-				checkInitPath ||
-				checkBlindPath ||
-				isInitting ||
-				pendingApproval ||
-				pendingScanMode ||
-				pendingOutcomeConfirmation ||
-				pendingSelect ||
-				pendingInput
-			) && (
+			{isQueryInputActive && (
 				<Box marginTop={1}>
 					<Text color={theme.user}>{'❯ '}</Text>
 					<TextInput

@@ -66,6 +66,14 @@ export type FeatureResultInput = {
 // model's own FeatureResultInput entries.
 export type FeatureResult = FeatureResultInput & {
 	playwrightStage: 'passed' | 'failed' | 'not-run';
+	// Set only when deriveEffectiveStatus (agent.ts) overrode the model's own
+	// status — the narrow blind-mode case where live exploration passed and
+	// the backend response was actually confirmed, but the scripted
+	// Playwright replay failed anyway. Kept for transparency/audit
+	// (failures.md, session logs); status itself is what every consumer
+	// (deriveOverallStatus, summarizeFeatureResults, formatAgentRunResult)
+	// already reads, so none of them need to change to see the correction.
+	modelReportedStatus?: FeatureResultInput['status'];
 };
 
 export type ReportResultArgs = {

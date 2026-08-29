@@ -4,6 +4,7 @@ import type {ResponseInputItem} from 'openai/resources/responses/responses';
 import {graphifyGraphExists} from '../projects/graphifyGraph.js';
 import {readProjectMap, type ProjectMap} from '../projects/scan.js';
 import {readProjectMemory, type ProjectMemory} from '../init/memory.js';
+import {recordUsage} from '../registry/usage.js';
 import {readFeatureClassifications} from '../projects/featureClassification.js';
 import {checksumFromContent} from '../projects/checksum.js';
 import {createOpenAIClient, type ResponsesClient} from './client.js';
@@ -21,7 +22,11 @@ import {
 	type AgentProgressEvent,
 	type AgentTurnResult,
 } from './agentLoop.js';
-import type {ReportResultArgs, FeatureResult} from './tools/reportResult.js';
+import type {
+	ReportResultArgs,
+	FeatureResult,
+	FeatureResultInput,
+} from './tools/reportResult.js';
 import type {
 	RunTestResult,
 	TestOutcome,
@@ -526,6 +531,39 @@ ${
 - Call report_result exactly once, when you are completely done with every feature, with one result entry per feature. Do not stop without calling it.`;
 }
 
+// Blind mode has strictly less information than normal mode when a
+// generated Playwright script fails — no read_file/graphify to check *why*
+// a script-only signal disagrees with what was actually observed live, just
+// an accessibility snapshot. Confirmed against a real run (RicardoLighting,
+// "create a quotation"): live exploration completed the flow and the
+// backend's own web_save response was checked and confirmed, but the
+// scripted replay hung on that same save across four independent runs —
+// the script's own limitation, not evidence the feature is broken. This
+// only overrides that exact narrow case: real evidence on both other legs
+// to lean on instead of the failing script alone. confidence: 'uncertain'
+// is deliberately excluded — that path already goes through
+// confirm_outcome (a human), and this isn't a second, quieter way around
+// that gate. backendResult must be 'confirmed-success' specifically, not
+// 'unverified' — same bar the schema already holds self-reports to
+// elsewhere (see backendResult's own description: the UI looking fine is
+// not enough evidence on its own).
+function deriveEffectiveStatus(
+	result: FeatureResultInput,
+	blind: boolean,
+): FeatureResultInput['status'] {
+	if (
+		blind &&
+		result.status === 'failed' &&
+		result.confidence === 'certain' &&
+		result.explorationResult === 'passed' &&
+		result.backendResult === 'confirmed-success'
+	) {
+		return 'passed';
+	}
+
+	return result.status;
+}
+
 // The model reports one status per feature, not one for the whole run — the
 // overall status is derived rather than declared, so it can't disagree with
 // the individual results.
@@ -684,6 +722,9 @@ export async function runTestingAgent(
 				signal: context.signal,
 				steps,
 				onProgress: options.onProgress,
+				onUsage(usage) {
+					recordUsage(usage.inputTokens, usage.outputTokens);
+				},
 				onToolDispatched(name) {
 					if (name === 'browser_action') {
 						hasUsedBrowserActionRef.current = true;
@@ -735,8 +776,15 @@ export async function runTestingAgent(
 					const run = result.file
 						? runResultsByFile.get(result.file)
 						: undefined;
+					const effectiveStatus = deriveEffectiveStatus(
+						result,
+						context.orbitConfig.blind,
+					);
 					return {
 						...result,
+						status: effectiveStatus,
+						modelReportedStatus:
+							effectiveStatus === result.status ? undefined : result.status,
 						playwrightStage: run
 							? run.result.passed
 								? 'passed'

@@ -2,6 +2,7 @@ import type {ResponseInputItem} from 'openai/resources/responses/responses';
 import {graphifyGraphExists} from '../projects/graphifyGraph.js';
 import {readProjectMap, type ProjectMap} from '../projects/scan.js';
 import {readProjectMemory, type ProjectMemory} from '../init/memory.js';
+import {recordUsage} from '../registry/usage.js';
 import type {CommandContext} from '../commands/context.js';
 import {createOpenAIClient, type ResponsesClient} from './client.js';
 import {
@@ -117,6 +118,9 @@ export async function runAskAgent(
 			signal: context.signal,
 			steps,
 			onProgress: options.onProgress,
+			onUsage(usage) {
+				recordUsage(usage.inputTokens, usage.outputTokens);
+			},
 		});
 
 		previousResponseId = turn.responseId;

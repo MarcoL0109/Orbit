@@ -14,6 +14,11 @@ export type OrbitError =
 	| {kind: 'project-already-initialized'}
 	| {kind: 'project-not-initialized'}
 	| {kind: 'invalid-blind-url'; url: string}
+	// Every blind workspace shares one Playwright/Chromium install at
+	// getBlindWorkspacesRoot() (see blindInit.ts) — a workspace anywhere
+	// else would need (and duplicate) its own copy, the exact thing
+	// centralizing them was meant to avoid.
+	| {kind: 'blind-storage-path-outside-root'; path: string; root: string}
 	| {kind: 'post-init-scan-failed'; cause: unknown}
 	// The environment setup agent never called signal_environment_ready —
 	// ran out of steps, or genuinely couldn't proceed (e.g. a needed
@@ -84,6 +89,10 @@ Type /help to see available commands.`;
 
 		case 'invalid-blind-url': {
 			return `"${error.url}" isn't a valid http(s) URL. /blind needs the full address of the running app, e.g. https://example.com.`;
+		}
+
+		case 'blind-storage-path-outside-root': {
+			return `"${error.path}" is outside ${error.root} — every blind workspace lives there now, so they can all share one Playwright/Chromium install instead of each downloading their own. Edit just the folder name, not the parent path.`;
 		}
 
 		case 'post-init-scan-failed': {

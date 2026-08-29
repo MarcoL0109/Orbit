@@ -1,5 +1,6 @@
 import type {ResponseInputItem} from 'openai/resources/responses/responses';
 import {readEnvironmentSetupInstructions} from '../init/memory.js';
+import {recordUsage} from '../registry/usage.js';
 import {createOpenAIClient, type ResponsesClient} from './client.js';
 import {
 	runAgentTurn,
@@ -96,6 +97,9 @@ export async function runEnvironmentSetupAgent(
 			signal: context.signal,
 			steps,
 			onProgress: options.onProgress,
+			onUsage(usage) {
+				recordUsage(usage.inputTokens, usage.outputTokens);
+			},
 		});
 
 		previousResponseId = turn.responseId;
