@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import React, {useEffect, useState, useRef} from 'react';
 import {Box, Text, useInput} from 'ink';
 import TextInput from 'ink-text-input';
@@ -199,6 +200,15 @@ export function App({initialPrompt}: AppProps) {
 	}
 
 	function refreshRecommendedPrompt(projectRoot: string): void {
+		// Blind projects have no source for the recommender to reason about
+		// (same gap as runAskFlow's blind guard in commands.ts) — a suggested
+		// next prompt here would just be a guess, so skip it entirely rather
+		// than show a low-confidence one.
+		if (project?.blind) {
+			setRecommendedPrompt(null);
+			return;
+		}
+
 		const requestId = recommendedPromptRequestRef.current + 1;
 		recommendedPromptRequestRef.current = requestId;
 
@@ -494,8 +504,32 @@ export function App({initialPrompt}: AppProps) {
 
 	const constructProjectOptions = () => {
 		const projectJsonList = readGlobalProjects();
-		const options = projectJsonList.projects.map(project => ({
-			label: `->${project.name}`,
+
+		// Neither kind of entry is re-checked by anything else once it's in
+		// the registry — a folder deleted by hand outside Orbit (blind
+		// workspace or a normal project's own codebase) leaves a stale row
+		// that would otherwise sit in the picker forever. Same staleness
+		// check handleProjectSelect already does on pick, just run up front
+		// so a dead entry never appears to be selected in the first place,
+		// rather than the user picking it and immediately hitting a "no
+		// longer exists" message.
+		const liveProjects = projectJsonList.projects.filter(project => {
+			// A blind entry's path is Orbit's own workspace: it's only ever
+			// "real" once /init has written its config, so readOrbitConfig
+			// is the meaningful check (matches handleProjectSelect). A normal
+			// project's path is a real codebase that can legitimately be
+			// un-initialized and still worth showing — readOrbitConfig would
+			// wrongly evict those, so plain directory existence is enough.
+			const stillExists = project.blind
+				? readOrbitConfig(project.path) !== null
+				: fs.existsSync(project.path) &&
+				  fs.statSync(project.path).isDirectory();
+			if (!stillExists) removeGlobalProject(project.path);
+			return stillExists;
+		});
+
+		const options = liveProjects.map(project => ({
+			label: `->${project.name}${project.blind ? ' (blind)' : ''}`,
 			value: project.name,
 		}));
 		options.push({

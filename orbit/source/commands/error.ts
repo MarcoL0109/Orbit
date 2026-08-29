@@ -34,6 +34,12 @@ export type OrbitError =
 	// no blind-awareness of their own — this is the shared guard in front
 	// of both, rather than two copies of the same check.
 	| {kind: 'not-available-in-blind-mode'; command: string}
+	// A plain (no-slash) question ordinarily works even pre-/init, since
+	// read_file/check_memory/etc. can still answer from raw source. Blind
+	// projects have no source to fall back on and no orbit folder yet
+	// either, so pre-init there's genuinely nothing to answer from — unlike
+	// not-available-in-blind-mode above, this lifts once /init runs.
+	| {kind: 'ask-requires-init-in-blind-mode'}
 	| {kind: 'unexpected'; action: string; cause: unknown};
 
 export type ArgCountRule = {exact: number} | {min: number};
@@ -100,6 +106,10 @@ Type /help to see available commands.`;
 
 		case 'not-available-in-blind-mode': {
 			return `${error.command} has no effect on a blind project — there is no local source to scan.`;
+		}
+
+		case 'ask-requires-init-in-blind-mode': {
+			return 'This blind project has no local source and has not been initialized yet, so there is nothing to answer from. Run /init first.';
 		}
 
 		case 'unexpected': {

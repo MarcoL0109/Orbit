@@ -274,12 +274,22 @@ export async function startBlindProjectFlow(
 // passed through below rather than a narrower slice — that tool needs
 // essentially everything a real /test invocation does, and every single
 // call to it asks for approval on its own regardless.
+//
+// That pre-init leniency assumes read_file (or similar) can still answer
+// something from raw source. Blind projects have no source and, pre-init,
+// no orbit folder either — nothing at all to draw on — so blind is the one
+// case this still needs to refuse until /init has run.
 export async function runAskFlow(
 	prompt: string,
 	context: CommandContext,
 ): Promise<void> {
 	if (!context.project?.root) {
 		reportError(context.setMessages, {kind: 'no-project-selected'});
+		return;
+	}
+
+	if (context.project.blind && !context.project.hasOrbitFolder) {
+		reportError(context.setMessages, {kind: 'ask-requires-init-in-blind-mode'});
 		return;
 	}
 
