@@ -122,11 +122,13 @@ function resolveBrowserName(
 function buildBrowserWorkerSource(
 	browserName: 'chromium' | 'firefox' | 'webkit',
 	baseUrl: string,
+	headed: boolean,
 ): string {
 	return `import { ${browserName} as launchBrowser } from 'playwright';
 import readline from 'node:readline';
 
 const baseURL = ${JSON.stringify(baseUrl)};
+const headless = ${JSON.stringify(!headed)};
 
 let browser = null;
 let context = null;
@@ -148,13 +150,24 @@ function payloadToText(payload) {
 }
 
 async function ensureBrowser() {
-  if (!browser) browser = await launchBrowser.launch();
+  if (!browser) browser = await launchBrowser.launch({headless});
   return browser;
 }
 
 async function ensurePage() {
   await ensureBrowser();
-  if (!context) context = await browser.newContext({baseURL});
+  // locale pinned explicitly, not left to Playwright's "system default
+  // locale" fallback — confirmed directly against this exact app that
+  // headed and headless Chromium resolve that fallback differently on the
+  // same machine (headed correctly read the real macOS locale; headless
+  // silently fell back to en-US instead), so a locale-sensitive page (a
+  // login form whose labels translate) can render two different languages
+  // depending only on which of the two ever launched it. Exploration
+  // (this file, always headed when the project has headed:true) and an
+  // actual test run (run_test's generated config) must agree, or a
+  // selector verified live can be verifying the wrong language's page
+  // entirely. See the matching 'locale' in runTest.ts's generated config.
+  if (!context) context = await browser.newContext({baseURL, locale: 'en-US'});
   if (!page) {
     page = await context.newPage();
 
@@ -362,7 +375,7 @@ async function handle(command) {
     case 'reset': {
       await ensureBrowser();
       if (context) await context.close();
-      context = await browser.newContext({baseURL});
+      context = await browser.newContext({baseURL, locale: 'en-US'});
       page = null;
       lastSnapshot = null;
       // These are module-level, not tied to the page object itself, so
@@ -415,6 +428,7 @@ export function spawnBrowserWorker(
 	projectRoot: string,
 	defaultBrowser: string,
 	baseUrl: string,
+	headed: boolean,
 ): BrowserWorkerHandle {
 	const indexDir = path.join(getOrbitDir(projectRoot), 'index');
 	fs.mkdirSync(indexDir, {recursive: true});
@@ -422,7 +436,11 @@ export function spawnBrowserWorker(
 	const workerPath = path.join(indexDir, 'browser-worker.mjs');
 	fs.writeFileSync(
 		workerPath,
-		buildBrowserWorkerSource(resolveBrowserName(defaultBrowser), baseUrl),
+		buildBrowserWorkerSource(
+			resolveBrowserName(defaultBrowser),
+			baseUrl,
+			headed,
+		),
 		'utf8',
 	);
 

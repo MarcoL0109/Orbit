@@ -35,6 +35,7 @@ function fakeConfig(overrides: Partial<OrbitConfig> = {}): OrbitConfig {
 		scanMode: null,
 		environmentSetupRoot: null,
 		blind: false,
+		headed: false,
 		...overrides,
 	};
 }
@@ -77,6 +78,9 @@ function fakeContext(
 		},
 		setCurrentExplorationNodeId() {
 			throw new Error('setCurrentExplorationNodeId should not be reached');
+		},
+		getSteps() {
+			throw new Error('getSteps should not be reached');
 		},
 	};
 }

@@ -1,5 +1,6 @@
 import type {OrbitConfig} from '../../init/config.js';
 import type {BrowserWorkerHandle} from '../browserWorker.js';
+import type {AgentStep} from '../agentLoop.js';
 
 export type ToolResult<T = unknown> =
 	| {ok: true; data: T}
@@ -58,6 +59,12 @@ export type ToolContext = {
 	// side effect of ordinary exploration; see explorationGraph.ts.
 	getCurrentExplorationNodeId: () => string | null;
 	setCurrentExplorationNodeId: (id: string | null) => void;
+	// This run's own step log so far — write_test_file uses it (in blind
+	// mode only) to check that every interactive name the file references
+	// traces back to something actually verified live this run, rather
+	// than trusting the model's own say-so. See verifiedSelectors.ts's
+	// findUnverifiedNames.
+	getSteps: () => AgentStep[];
 };
 
 // Deliberately smaller than ToolContext — the environment setup agent's

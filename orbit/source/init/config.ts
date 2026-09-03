@@ -60,6 +60,12 @@ export type OrbitConfig = {
 	// project with real source next to this config never becomes blind by
 	// flipping a bit, since the source would still be sitting right there.
 	blind: boolean;
+	// False (headless) by default, matching Playwright's own default and
+	// keeping runs fast/CI-friendly — set true to launch a real, visible
+	// browser window instead, for actually watching a run happen live
+	// rather than reconstructing it from trace/network archaeology
+	// afterward. See browserWorker.ts's launch() call.
+	headed: boolean;
 };
 
 export function getOrbitConfigPath(projectRoot: string): string {

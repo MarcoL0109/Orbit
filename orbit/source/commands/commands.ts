@@ -76,7 +76,8 @@ export type ConfigFieldDescriptor =
 	| {key: 'testCommand'; label: string; kind: 'text'; nullable: true}
 	| {key: 'environmentSetupRoot'; label: string; kind: 'text'; nullable: true}
 	| {key: 'maxRepairAttempts'; label: string; kind: 'number'}
-	| {key: 'devCommands'; label: string; kind: 'csv'};
+	| {key: 'devCommands'; label: string; kind: 'csv'}
+	| {key: 'headed'; label: string; kind: 'boolean'};
 
 export const CONFIG_FIELDS: ConfigFieldDescriptor[] = [
 	{
@@ -113,6 +114,7 @@ export const CONFIG_FIELDS: ConfigFieldDescriptor[] = [
 	},
 	{key: 'maxRepairAttempts', label: 'Max repair attempts', kind: 'number'},
 	{key: 'devCommands', label: 'Dev commands', kind: 'csv'},
+	{key: 'headed', label: 'Display browser window', kind: 'boolean'},
 ];
 
 export function formatConfigFieldValue(
@@ -127,6 +129,7 @@ export function formatConfigFieldValue(
 	if (value === null || value === undefined) return '(none)';
 	if (Array.isArray(value))
 		return value.length > 0 ? value.join(', ') : '(none)';
+	if (field.kind === 'boolean') return value ? 'Yes' : 'No';
 	return String(value);
 }
 
@@ -752,7 +755,16 @@ Available Orbit commands:
 
 				let nextConfig: OrbitConfig | null = null;
 
-				if (field.kind === 'enum') {
+				if (field.kind === 'boolean') {
+					const picked = await context.requestSelect(
+						`New value for ${field.label}:`,
+						[
+							{label: 'Yes', value: 'true'},
+							{label: 'No', value: 'false'},
+						],
+					);
+					nextConfig = {...orbitConfig, [field.key]: picked === 'true'};
+				} else if (field.kind === 'enum') {
 					const picked = await context.requestSelect(
 						`New value for ${field.label}:`,
 						field.options.map(option => ({label: option, value: option})),

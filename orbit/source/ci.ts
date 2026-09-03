@@ -293,7 +293,12 @@ async function runCiBody(
 		);
 	}
 
-	const ciOrbitConfig = {...orbitConfig, testDir: CI_TEST_DIR};
+	// Forced regardless of what's persisted in the project's own config —
+	// a real CI runner typically has no display to open a browser window
+	// on at all, and even where one exists, a user's local `headed: true`
+	// left on from debugging should never silently carry into a pipeline
+	// run.
+	const ciOrbitConfig = {...orbitConfig, testDir: CI_TEST_DIR, headed: false};
 
 	let result;
 	try {

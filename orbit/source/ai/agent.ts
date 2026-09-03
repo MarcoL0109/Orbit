@@ -5,6 +5,7 @@ import {graphifyGraphExists} from '../projects/graphifyGraph.js';
 import {readProjectMap, type ProjectMap} from '../projects/scan.js';
 import {readProjectMemory, type ProjectMemory} from '../init/memory.js';
 import {recordUsage} from '../registry/usage.js';
+import {summarizeVerifiedSelectors} from './verifiedSelectors.js';
 import {
 	readExplorationGraph,
 	summarizeExplorationGraph,
@@ -172,148 +173,11 @@ function collectTestsWrittenThisRun(
 	return [...files];
 }
 
-type VerifiedBrowserAction =
-	| {
-			action: 'click' | 'selectOption' | 'hover';
-			selector: string;
-			value: string | null;
-			frame: string | null;
-	  }
-	| {
-			action: 'fill';
-			selector: string;
-			value: string | null;
-			frame: string | null;
-	  }
-	| {
-			action: 'press';
-			selector: string | null;
-			key: string;
-			frame: string | null;
-	  }
-	| {
-			action: 'wait';
-			selector: string;
-			state: 'visible' | 'hidden';
-			frame: string | null;
-	  };
-
-// Pulled straight from this run's own browser_action call log — the exact
-// selector strings already confirmed to work against the real, live page,
-// not a description of them. write_test_file takes free-form content the
-// model composes itself; nothing forces it to reuse a selector it already
-// verified rather than reconstructing a similar-looking one from memory of
-// general Playwright/framework conventions, and those two don't always
-// match (a selector that resolved uniquely in the exact moment it was
-// clicked live isn't guaranteed to be the one the model recalls when
-// writing the file afterward). Surfacing the verified list explicitly, every
-// turn, is what actually closes that gap — see buildSystemPrompt below.
-// click/fill/selectOption/press/hover/wait only: navigate/snapshot/reset
-// have no selector (or key/state) worth reusing.
-function collectVerifiedSelectorsThisRun(
-	steps: AgentStep[],
-): VerifiedBrowserAction[] {
-	const verified: VerifiedBrowserAction[] = [];
-
-	for (let index = 0; index < steps.length - 1; index++) {
-		const call = steps[index];
-		const result = steps[index + 1];
-
-		if (
-			call?.type !== 'tool_call' ||
-			call.name !== 'browser_action' ||
-			result?.type !== 'tool_result' ||
-			result.name !== 'browser_action' ||
-			!result.result.ok
-		) {
-			continue;
-		}
-
-		const args = call.args as {
-			action?: string;
-			selector?: string | null;
-			value?: string | null;
-			key?: string | null;
-			frame?: string | null;
-		};
-
-		if (
-			(args.action === 'click' ||
-				args.action === 'selectOption' ||
-				args.action === 'hover') &&
-			args.selector
-		) {
-			verified.push({
-				action: args.action,
-				selector: args.selector,
-				value: args.value ?? null,
-				frame: args.frame ?? null,
-			});
-		} else if (args.action === 'fill' && args.selector) {
-			verified.push({
-				action: 'fill',
-				selector: args.selector,
-				value: args.value ?? null,
-				frame: args.frame ?? null,
-			});
-		} else if (args.action === 'press' && args.key) {
-			verified.push({
-				action: 'press',
-				selector: args.selector ?? null,
-				key: args.key,
-				frame: args.frame ?? null,
-			});
-		} else if (
-			args.action === 'wait' &&
-			args.selector &&
-			(args.value === 'visible' || args.value === 'hidden')
-		) {
-			verified.push({
-				action: 'wait',
-				selector: args.selector,
-				state: args.value,
-				frame: args.frame ?? null,
-			});
-		}
-	}
-
-	return verified;
-}
-
-function summarizeVerifiedSelectors(steps: AgentStep[]): string {
-	const verified = collectVerifiedSelectorsThisRun(steps);
-
-	if (verified.length === 0) {
-		return 'None yet this run.';
-	}
-
-	return verified
-		.map(entry => {
-			const inFrame = entry.frame ? ` inside frame ${entry.frame}` : '';
-
-			switch (entry.action) {
-				case 'click':
-					return `- click: ${entry.selector}${inFrame}`;
-				case 'hover':
-					return `- hover: ${entry.selector}${inFrame}`;
-				case 'fill':
-					return `- fill: ${entry.selector} = ${JSON.stringify(
-						entry.value,
-					)}${inFrame}`;
-				case 'selectOption':
-					return `- selectOption: ${entry.selector} = ${JSON.stringify(
-						entry.value,
-					)}${inFrame}`;
-				case 'press':
-					return entry.selector
-						? `- press: "${entry.key}" on ${entry.selector}${inFrame}`
-						: `- press: "${entry.key}" (global, no element focused)${inFrame}`;
-				case 'wait':
-					return `- wait: ${entry.selector} until ${entry.state}${inFrame}`;
-			}
-		})
-		.join('\n');
-}
+// VerifiedBrowserAction, collectVerifiedSelectorsThisRun, and
+// summarizeVerifiedSelectors moved to verifiedSelectors.ts — shared with
+// write_test_file's own blind-mode enforcement (findUnverifiedNames), which
+// can't import from here without a circular dependency (this file already
+// pulls write_test_file's tool in via tools/index.js).
 
 // Reuses whatever /scan already computed instead of leaving the model to
 // guess file paths blind — read_file still exists for the actual deep dive
@@ -492,7 +356,7 @@ ${
 				failures: true,
 		  })}
 
-## Exploration graph (built from live browsing on past runs against this app — a hint, not ground truth; still verify live before trusting an edge, an app can change)
+Exploration graph (built from live browsing on past runs against this app — a hint, not ground truth; still verify live before trusting an edge, an app can change)
 ${summarizeExplorationGraph(readExplorationGraph(context.projectRoot))}`
 		: summarizeMemory(memory)
 }
@@ -500,6 +364,8 @@ ${summarizeExplorationGraph(readExplorationGraph(context.projectRoot))}`
 If a run fails because of a broken selector or similar test-side issue, you may patch that feature's test file and run it again — you have a budget of ${
 		context.orbitConfig.maxRepairAttempts
 	} repair attempts per feature. If a run fails because of an actual application bug (not a problem with the test itself), do not keep patching it — report that feature as failed instead. This includes a bug you identified during exploration rather than from a run_test failure (see below): still write the test against the intended behavior and run it once, so the failure is backed by a real, reproducible Playwright result rather than only your own read of the page — but do not spend repair attempts on it once that run confirms it, since patching the test cannot fix a bug in the application. Report the feature as failed right away instead.
+
+A repair does not mean starting over: nothing resets your browser session or the selectors you've already verified live this run between repair attempts, so reusing them is always valid. When run_test fails, read its error and stackTrace first — that's an exact file/line pointing at the specific step that broke. Re-explore live only that step (and anything genuinely downstream of what the fix touches), and reuse everything you already verified earlier this run for the rest, per "Selectors already confirmed to work this run" below — do not re-walk the whole flow (re-login, re-navigate, re-pick the same customer) from scratch as a default reflex. Full re-exploration is only warranted when the failure's own evidence doesn't point at one specific step — the error is ambiguous, or the fix you're making could plausibly have changed something upstream too — not for every repair regardless of what actually broke.
 
 Telling these apart during live exploration (not a run_test failure) is otherwise genuinely ambiguous — a form that silently doesn't do what you expected looks the same on screen whether your click missed its target or the server errored out. Don't guess: check the browser_action response's apiCalls and consoleErrors fields (present on every response, even when nothing went wrong) before deciding which case you're in.
 - An apiCalls entry with a 4xx/5xx status and a real backend error message is direct, decisive evidence of an application bug — stop retrying different inputs or selectors, no UI-side change will fix a server error. Report it as a bug instead.
@@ -517,12 +383,32 @@ ${summarizeVerifiedSelectors(steps)}
 
 When you write_test_file, reuse these exact strings for anything they cover — do not re-derive a similar-looking selector from memory or from a general convention of how this kind of element "usually" works. A selector you already confirmed resolves uniquely on the real page is more trustworthy than one you reconstruct afterward, and the two are not guaranteed to match — reconstructing from memory instead of reusing what you verified is exactly how a past run wrote a selector that hung forever even though the equivalent live click had worked moments earlier. If a step in the test isn't covered by anything in this list, that means you wrote or ran the test without verifying that step live first — go back and verify it with browser_action before writing it, rather than guessing. For an entry marked "inside frame X", write it in the test file as \`page.frameLocator(X).locator(selector)\` — a plain \`page.locator(selector)\` only searches the main page's document and will never find an element that lives inside an iframe, even if the exact same selector string worked live via browser_action's \`frame\` argument.
 
-A live "press" that worked can still be a no-op once written down — verify with wait, not just latency. Pressing Enter to confirm a highlighted autocomplete/dropdown suggestion only works once that suggestion has actually finished loading and become the active one; during YOUR OWN exploration there's real time between one browser_action call and the next (each one's own settle, plus your own reasoning time), which is often enough for that to happen without you noticing it was timing-dependent at all. A written test has none of that gap — click() and press('Enter') run back-to-back with nothing in between — so a press that looked instant and reliable while you were exploring can silently select nothing once it's replayed at full speed. Confirmed live: a past run's exploration genuinely selected a customer this way and the resulting record really saved; the written test copied the identical click-then-press sequence and Enter fired before anything was highlighted, so the field stayed empty, a required-field validation silently blocked the save, and the test hung waiting for a network response that was never going to come. Before writing (or, better, before even relying on) a bare press('Enter') to confirm a selection — in exploration or in the file you write — use wait to confirm an option is actually visible/ready first, and write that same wait into the test file immediately before the press, not just the press by itself.
+A live action that worked can still be a no-op — or silently invalid — once written down; verify with wait, not just latency. This isn't only about press('Enter') after an autocomplete: ANY action whose correctness depends on something ELSE having actually finished first — a computed field populating, a price being fetched, a background validation completing — only reliably works once that dependency has genuinely settled. During YOUR OWN exploration there's real time between one browser_action call and the next (each one's own settle, plus your own reasoning time), which is often enough for that to happen without you noticing it was timing-dependent at all. A written test has none of that gap — one action runs immediately after the last, back to back — so a sequence that looked instant and reliable while you were exploring can silently break once replayed at full speed. Confirmed live, twice, two different mechanisms: (1) a past run's exploration selected a customer via click-then-press('Enter') and the record really saved; the written test copied the identical sequence, but Enter fired before the suggestion had actually loaded, so the field stayed empty and a required-field validation silently blocked the save. (2) a past run clicked Save 20ms after selecting a product; the async chain that computes and applies that product's price was still in flight, its own final step got cancelled outright, and Odoo correctly rejected the order line as incomplete — confirmed directly from the network trace, not inferred. (3) a past run selected a product, its price finished computing (confirmed correct in the DOM), then clicked Save immediately afterward anyway — the click itself succeeded, but no save request was EVER issued at all (confirmed from a full read of the network trace, not just a missing response): the combobox that had just been selected from was still shown as focused/active, and a value having computed is not the same as the field itself having been committed — a combobox can be finished computing and still count as "being edited" until something moves focus off it. Before writing (or relying on) any action whose correctness depends on a prior action's side effect having fully settled — not just that prior action's own click succeeding — wait for that dependency's real, observable outcome (the specific field actually populating, the specific suggestion actually visible) first, and write that same wait into the test file, not just the bare sequence of actions. For a combobox/searchable field specifically, "settled" means both: the value it computed is correct, AND the field itself is no longer focused/active — after clicking an option, check a fresh snapshot before your next action (especially before Save) and confirm that field no longer reports itself as active; if it still does, click elsewhere on the page (a neutral area, or the next field you need anyway) to commit it first.
 
-Proving persistence, not just a clean-looking form: when a feature creates, saves, submits, or otherwise persists something, the test's FINAL assertion must prove the change actually persisted on the server — not just that the form looks fine at that instant. A save/submit click triggers an async request; the moment right after clicking it is still the PRE-save state on screen. If every assertion the test makes would already be true before that request finishes, Playwright can tear the browser context down as soon as the test function returns — which can cut the save request off before it ever completes, so the test passes without the record ever actually being created. Bad: asserting no validation-error text is shown, or that a value you just typed is still visible in the form — both are already true before the save request resolves, proving nothing. Good: assert on something that only becomes true AFTER persistence completes — a generated reference/ID appearing (e.g. matching /ORDER-\d+/ or whatever this app's real pattern is), the URL or breadcrumb changing away from a "new"/"create" state, or an explicit page.waitForResponse(...) matching the real save request you already saw succeed via browser_action's apiCalls during exploration, awaited before any further assertions. If you never actually watched a real save succeed during exploration — checked its apiCalls entry, not just that the DOM looked fine afterward — go verify that live first rather than guessing what the success signal looks like.
+Proving persistence, not just a clean-looking form: when a feature creates, saves, submits, or otherwise persists something, the test's FINAL assertion must prove the change actually persisted on the server — not just that the form looks fine at that instant. A save/submit click triggers an async request; the moment right after clicking it is still the PRE-save state on screen. If every assertion the test makes would already be true before that request finishes, Playwright can tear the browser context down as soon as the test function returns — which can cut the save request off before it ever completes, so the test passes without the record ever actually being created. Bad: asserting no validation-error text is shown, or that a value you just typed is still visible in the form — both are already true before the save request resolves, proving nothing. Good: assert on something that only becomes true AFTER persistence completes — a generated reference/ID appearing (e.g. matching /ORDER-\d+/ or whatever this app's real pattern is), the URL or breadcrumb changing away from a "new"/"create" state, or an explicit page.waitForResponse(...) matching the real save request you already saw succeed via browser_action's apiCalls during exploration, awaited before any further assertions. If you never actually watched a real save succeed during exploration — checked its apiCalls entry, not just that the DOM looked fine afterward — go verify that live first rather than guessing what the success signal looks like. Also confirmed live: a NEGATIVE wait like not.toHaveText(oldValue) is satisfied by ANY value other than oldValue — including a transient EMPTY string while the element re-renders mid-update — so it can report success before the real value has actually arrived, and a test that immediately reads that value afterward can capture that empty moment instead; wait for the actual expected value/pattern directly (toHaveText(/expectedPattern/)), never for merely "not the old one".
+
+Matching the right property, not just the right element: confirm via a browser_action snapshot whether the field you're asserting on is actually an editable form control (its accessibility role will say "textbox", "combobox", etc.) or plain rendered text, and match accordingly — toHaveValue() for a real form control (an <input>, or anything reporting an editable role even inside what looks like a plain heading), toHaveText() only for genuine static text. toHaveText() reads rendered text NODES; an input's value is never one of those, so checking it that way reports empty even when the real value is clearly visible on screen. This mistake specifically tends to recur on a page's own H1/title heading, because it visually reads as "just a heading" while actually wrapping an editable field — confirmed directly, on the SAME element, across separate runs: a generated record reference shown in an <h1> that turned out to be \`<h1><div name="..."><input .../></div></h1>\`, where toHaveText() against the outer heading role reported an empty string every time despite the real value being clearly visible on screen, and only asserting toHaveValue() against the inner textbox role actually worked. Do not assume a heading is static text just because it looks like one — check its actual role composition in a snapshot before choosing the matcher, every time, even for an element you'd otherwise assume is safe. Separately, when confirming persistence via a list or search view, scope the assertion to the ONE row you actually created — by a value you know is unique to it, like a generated reference — rather than checking an unscoped value (a customer name, a product name) that legitimately also appears on other rows; Playwright's strict mode will correctly refuse to guess which one you meant, and matching against the whole page proves nothing about the specific record this test cares about anyway. Concretely, this means getting a locator for the row itself FIRST, by its unique value, and checking every other value against THAT locator — never a separate top-level page.getByRole('cell', {name: ...}) per value, even for the unique one:
+\`\`\`
+const row = page.getByRole('row', { name: new RegExp(uniqueRef) });
+await expect(row).toBeVisible();
+await expect(row).toContainText(customerName);
+await expect(row).toContainText(otherKnownValue);
+\`\`\`
+Three independent page.getByRole('cell', ...) calls — even when the FIRST one happens to be unique — silently regresses to exactly this bug on every value after it, since nothing scopes those later checks to the row the first one found. Confirmed directly: a written test's own final assertion did exactly this (three separate top-level cell checks, one per value) and failed with a strict-mode violation — 34 elements — on the customer-name check, despite that being the literal example already named here as unsafe. Get the row once, assert everything else against it.
+
+Default to fill over click whenever both could apply — unless something specific about the flow calls for click instead, fill wins. Check the element's accessibility role: if it's a real "combobox"/"textbox" (as opposed to a plain button that merely opens a static menu), it accepts typed input, and that means click-then-pick-from-whatever-shows-up is never the first choice — type the actual value you want (or a distinguishing substring of it) first, THEN click the resulting option. Clicking an element that accepts typed input without typing into it first shows some default/general list, not a search result for anything specific, and that default list is not fixed or predictable — it is not "common items always appear, obscure ones don't"; the SAME item can appear in it on one run and not the next. Confirmed directly, repeatedly, on the single most-used product in this project's own test history: identical unfiltered click, same product, succeeded on some runs and timed out with an empty list on others. An unfiltered click "working" during your own exploration is not evidence it is safe — it is exactly as likely to be one of the runs that happened to get lucky, and you have no way to tell which from inside a single successful click. Fill first, every time an element's role says it accepts typed input, regardless of how "obviously available" or frequently-used the target seems.
+
+The option you then click on needs an exact match, by default — getByRole('option', { name: <what you typed> }) with no \`exact: true\` (or an unanchored regex) matches ANY option whose name contains that substring, not just the one you meant, and a filtered list commonly contains more than one: a related record sharing part of the name ("Advance Technology Inc." vs "Advance Technology Inc., Mr. Murai"), or the app's own "Create '<value>'" quick-add entry offered alongside a real exact match. Confirmed directly, repeatedly, across separate runs against the same app: the identical unqualified name match hit a strict-mode violation (2+ elements) both on a customer field and, separately, a product field, each time because a same-substring option existed alongside the real one. Default to \`exact: true\` (or an anchored regex, \`^exact value$\`) on every option you select from a filtered list — treat an unqualified name match here the same as you'd treat any other locator that isn't guaranteed unique, not as a shortcut that happens to work until it doesn't.
 
 Rules:
-- Prefer Playwright and role-based selectors (getByRole, getByLabel, getByText).
+- Selector preference, checked in this order via a browser_action snapshot before you write anything — don't reach for a lower tier just because it "obviously" works, and don't stop checking early just because the first tier you tried came back empty for THIS element specifically:
+  1. A stable, hand-authored attribute on the element itself — id, name, or data-testid. Disqualifying exception: an id/name that is clearly generated from the element's position or render count (a numeric/list-index suffix like id="autocomplete_0_2", a hash-like generated string) is NOT stable — it can point at a different item next run purely because a list changed, with nothing about the element itself having changed at all. Confirmed directly this session: a customer autocomplete's options carried ids like autocomplete_0_0 through autocomplete_0_4 keyed purely to position in that one dropdown's result list. Treat a positional id as disqualified from this tier entirely, not as a weaker version of it — fall through to tier 3 for that element, never use it.
+  2. The same kind of attribute on the element's immediate wrapping container, when the element itself has none but its wrapper does — locate the wrapper, then narrow to the actual interactive child inside it. Confirmed directly this session: this app's field widgets tag the wrapping <div>/<td> with name="<technical_field_name>" (e.g. name="partner_id") even when the <input> inside carries no attribute of its own — a case tier 1 alone would miss entirely since it only looks at the element itself.
+  3. Role + accessible name (getByRole with name, getByLabel, getByPlaceholder) — the correct choice whenever tiers 1-2 turn up nothing, which is common for controls with no semantic markup at all (toolbar buttons, search-as-you-type comboboxes); this remains Playwright's own recommended default for exactly that case. Its real cost: the \`name\` it matches is rendered, human-language text — a button's label, a field's caption — which is exactly what changes if the page ever renders in a different language. Confirmed directly this session: the identical login form rendered "Email"/"Password" in one session and "電郵"/"密碼" in another purely from a Chromium locale-detection quirk unrelated to the app itself, breaking a text-based selector outright while a tier-1 name="login" attribute on the same field never changed. (Orbit now pins a fixed browser locale for both exploration and every test run specifically to close that particular gap — but the underlying fragility of matching rendered text is still real for any OTHER text that can legitimately vary, so the tier order still matters.)
+  4. getByText, for genuine static content with no interactive role and nothing from tiers 1-3.
+  5. Structural/positional CSS (nth-child, a framework-generated class name) — last resort only, when nothing above resolves the element uniquely. A class name is an implementation detail of whatever UI framework rendered the page, not a contract, and is the most likely of all five tiers to break on an unrelated update.
+
+  This order is about which attribute to key off of for ONE element — it does not replace scoping. In a list/table view, get the row itself first, by whatever value is actually unique to the record, and do every other check against THAT row locator regardless of which tier resolved it (see "Matching the right property" below) — a good tier-1 selector for a cell still matches every row sharing that column's value if you never scope to the row it's in.
 ${
 	context.orbitConfig.blind
 		? '- There is no source to read in this run — derive every selector from browser_action, verified live, never from a guess at how this kind of element "usually" works.'
@@ -544,6 +430,7 @@ ${
 - If you mark a result 'uncertain', call confirm_outcome for that exact feature BEFORE calling report_result — show the user what you actually did and the real evidence (not your interpretation of it), and use their answer as that feature's actual status. report_result will reject an 'uncertain' result it hasn't already gotten a matching confirm_outcome call for; the feature name you pass to confirm_outcome must exactly match the one you then use in report_result.
 - Every result reported as 'failed' or 'gave_up' needs a rootCause: the specific reason it failed, not a restatement of the summary. "Timed out while saving" is not a root cause; "getByRole('combobox').click() was intercepted by its own already-open dropdown" is. If you genuinely don't know why it failed, look again — reread run_test's error/stackTrace, or take a fresh browser_action snapshot — before calling report_result, rather than guessing. report_result rejects a failed/gave_up result with no rootCause. This gets written to project memory for the next run against this project to read, so a vague rootCause is exactly as useless to that future run as none at all.
 - Every result also needs explorationResult/explorationReason and backendResult/backendReason — a breakdown of where the pipeline actually stood, since any one of live exploration, the real backend request, and the written Playwright test can be the actual point of failure while the others are fine, and an overall status/rootCause alone doesn't say which. explorationResult is about whether YOU, live with browser_action, actually got the flow to work — not whether the written test passed. backendResult is specifically about the real server response for whatever this feature creates/saves/submits: mark 'confirmed-success' ONLY if you actually checked the real response (browser_action's apiCalls, or an explicit network wait in the test) and it succeeded — never mark it 'confirmed-success' just because the UI looked fine afterward, since the UI can look fine before an async save has even finished. Mark 'unverified' rather than guessing if you never actually checked. Each needs its own one-line reason distinct from summary/rootCause — report_result rejects a result with either reason missing or blank.
+- For any feature that creates, saves, or submits something: before writing the test, you must (1) click the actual state-changing action live via browser_action — do not stop exploring just short of it — and (2) independently verify the result actually persisted by navigating away and re-finding it through a separate path (a search, a list view, reloading and re-navigating to it by its own reference), not merely observing the same form's own state change afterward. A network wait in the generated test is not a substitute for this and is not sufficient evidence on its own for backendResult: 'confirmed-success' — a wait that never resolves proves nothing, and one that does resolve is still just replaying what you should have already confirmed live. If you cannot complete both (1) and (2) live, mark backendResult: 'unverified' honestly rather than writing a test around an unconfirmed assumption.
 - Call report_result exactly once, when you are completely done with every feature, with one result entry per feature. Do not stop without calling it.`;
 }
 
@@ -610,6 +497,7 @@ export async function runTestingAgent(
 		| 'hasConfirmedOutcome'
 		| 'getCurrentExplorationNodeId'
 		| 'setCurrentExplorationNodeId'
+		| 'getSteps'
 	>,
 	options: RunTestingAgentOptions = {},
 ): Promise<AgentRunResult> {
@@ -650,6 +538,7 @@ export async function runTestingAgent(
 					context.projectRoot,
 					context.orbitConfig.defaultBrowser,
 					context.orbitConfig.baseUrl,
+					context.orbitConfig.headed,
 				);
 			}
 
@@ -662,6 +551,7 @@ export async function runTestingAgent(
 		setCurrentExplorationNodeId: id => {
 			currentExplorationNodeIdRef.current = id;
 		},
+		getSteps: () => steps,
 	};
 
 	// Computed once, not per-turn — scanMode, the graph's presence on disk,

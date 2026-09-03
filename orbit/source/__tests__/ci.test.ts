@@ -27,6 +27,7 @@ function fakeConfig(overrides: Partial<OrbitConfig> = {}): OrbitConfig {
 		scanMode: null,
 		environmentSetupRoot: null,
 		blind: false,
+		headed: false,
 		...overrides,
 	};
 }

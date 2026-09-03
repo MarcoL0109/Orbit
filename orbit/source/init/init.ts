@@ -275,6 +275,7 @@ export function initOrbitProject({
 			scanMode: null,
 			environmentSetupRoot: null,
 			blind: Boolean(blind),
+			headed: false,
 		} satisfies OrbitConfig),
 
 		// Neither file gets scaffolded for a blind project — both are pure

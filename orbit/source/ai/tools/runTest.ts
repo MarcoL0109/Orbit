@@ -75,6 +75,14 @@ export default defineConfig({
   timeout: 60_000,
   use: {
     baseURL: ${JSON.stringify(baseUrl)},
+    // Pinned explicitly to match browserWorker.ts's exploration context —
+    // Playwright's "system default locale" fallback resolves differently
+    // between headed (exploration) and headless (this run) Chromium on the
+    // same machine, confirmed directly against a real app whose login page
+    // rendered in two different languages purely because of that gap, not
+    // any real session/app variance. Selectors verified live must be
+    // verifying the same language's page a real run will actually see.
+    locale: 'en-US',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
