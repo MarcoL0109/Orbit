@@ -276,6 +276,11 @@ export function initOrbitProject({
 			environmentSetupRoot: null,
 			blind: Boolean(blind),
 			headed: false,
+			testingModel: 'gpt-5.6-luna',
+			chatModel: 'gpt-5.6-luna',
+			environmentSetupModel: 'gpt-5.6-luna',
+			classificationModel: 'gpt-5.4-nano',
+			promptRecommendationModel: 'gpt-5.4-nano',
 		} satisfies OrbitConfig),
 
 		// Neither file gets scaffolded for a blind project — both are pure

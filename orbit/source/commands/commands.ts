@@ -46,6 +46,7 @@ import {
 	readGlobalUsage,
 	resetGlobalUsage,
 	estimateCostUsd,
+	totalTokens,
 } from '../registry/usage.js';
 import {runTestCommand} from './testCommand.js';
 import type {CommandContext} from './context.js';
@@ -77,7 +78,22 @@ export type ConfigFieldDescriptor =
 	| {key: 'environmentSetupRoot'; label: string; kind: 'text'; nullable: true}
 	| {key: 'maxRepairAttempts'; label: string; kind: 'number'}
 	| {key: 'devCommands'; label: string; kind: 'csv'}
-	| {key: 'headed'; label: string; kind: 'boolean'};
+	| {key: 'headed'; label: string; kind: 'boolean'}
+	| {key: 'testingModel'; label: string; kind: 'text'; nullable: false}
+	| {key: 'chatModel'; label: string; kind: 'text'; nullable: false}
+	| {
+			key: 'environmentSetupModel';
+			label: string;
+			kind: 'text';
+			nullable: false;
+	  }
+	| {key: 'classificationModel'; label: string; kind: 'text'; nullable: false}
+	| {
+			key: 'promptRecommendationModel';
+			label: string;
+			kind: 'text';
+			nullable: false;
+	  };
 
 export const CONFIG_FIELDS: ConfigFieldDescriptor[] = [
 	{
@@ -115,6 +131,31 @@ export const CONFIG_FIELDS: ConfigFieldDescriptor[] = [
 	{key: 'maxRepairAttempts', label: 'Max repair attempts', kind: 'number'},
 	{key: 'devCommands', label: 'Dev commands', kind: 'csv'},
 	{key: 'headed', label: 'Display browser window', kind: 'boolean'},
+	{
+		key: 'testingModel',
+		label: 'Testing agent model',
+		kind: 'text',
+		nullable: false,
+	},
+	{key: 'chatModel', label: 'Chat agent model', kind: 'text', nullable: false},
+	{
+		key: 'environmentSetupModel',
+		label: 'Environment setup agent model',
+		kind: 'text',
+		nullable: false,
+	},
+	{
+		key: 'classificationModel',
+		label: 'Feature classification model',
+		kind: 'text',
+		nullable: false,
+	},
+	{
+		key: 'promptRecommendationModel',
+		label: 'Prompt suggestion model',
+		kind: 'text',
+		nullable: false,
+	},
 ];
 
 export function formatConfigFieldValue(
@@ -1003,13 +1044,14 @@ Available Orbit commands:
 		argsRule: {exact: 0},
 		async handler(_args, context) {
 			const current = readGlobalUsage();
+			const currentTokens = totalTokens(current);
 			const sinceText = current.since
 				? `since ${new Date(current.since).toLocaleDateString()}`
 				: 'with no prior recording';
 			const approved = await context.requestApproval(
-				`Reset tracked usage (${current.inputTokens.toLocaleString()} input / ${current.outputTokens.toLocaleString()} output tokens, ~$${estimateCostUsd(
+				`Reset tracked usage (${currentTokens.inputTokens.toLocaleString()} input / ${currentTokens.outputTokens.toLocaleString()} output tokens, ~$${estimateCostUsd(
 					current,
-				).toFixed(2)}, ${sinceText}) back to zero? This cannot be undone.`,
+				).totalUsd.toFixed(2)}, ${sinceText}) back to zero? This cannot be undone.`,
 			);
 
 			if (!approved) return;

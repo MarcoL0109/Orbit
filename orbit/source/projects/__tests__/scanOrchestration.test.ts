@@ -35,6 +35,11 @@ function baseConfig(overrides: Partial<OrbitConfig> = {}): OrbitConfig {
 		environmentSetupRoot: null,
 		blind: false,
 		headed: false,
+		testingModel: 'gpt-5.6-luna',
+		chatModel: 'gpt-5.2',
+		environmentSetupModel: 'gpt-5.2',
+		classificationModel: 'gpt-5.2',
+		promptRecommendationModel: 'gpt-5.2',
 		...overrides,
 	};
 }

@@ -6,6 +6,7 @@ import {
 	recordClassification,
 } from '../../projects/featureClassification.js';
 import {classifyFileFeatures} from '../classifyFeature.js';
+import {readOrbitConfig} from '../../init/config.js';
 import type {ToolDefinition} from './types.js';
 
 type ReadFileArgs = {
@@ -130,6 +131,8 @@ export const readFileTool: ToolDefinition<
 					const classification = await classifyFileFeatures(
 						relativePath,
 						content,
+						readOrbitConfig(context.projectRoot)?.classificationModel ??
+							'gpt-5.4-nano',
 						undefined,
 						context.signal,
 					);

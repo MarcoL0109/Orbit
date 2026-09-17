@@ -7,6 +7,8 @@ import {computeCoverage, formatCoverageSummary} from '../projects/coverage.js';
 import {createOpenAIClient, type ResponsesClient} from './client.js';
 import {summarizeProjectMap, summarizeMemory} from './agent.js';
 import {getOrbitDir} from '../init/orbitDir.js';
+import {readOrbitConfig} from '../init/config.js';
+import {recordUsage} from '../registry/usage.js';
 
 type StoredSession = {
 	prompt: string;
@@ -81,6 +83,8 @@ export async function generateRecommendedPrompt(
 	const projectMap = readProjectMap(projectRoot);
 	const memory = readProjectMemory(projectRoot);
 	const latestSession = readLatestSession(projectRoot);
+	const model =
+		readOrbitConfig(projectRoot)?.promptRecommendationModel ?? 'gpt-5.4-nano';
 	const coverageSummary = projectMap
 		? formatCoverageSummary(computeCoverage(projectMap, projectRoot))
 		: 'No project index yet — nothing has been scanned.';
@@ -112,7 +116,7 @@ ${summarizeMemory(memory)}`;
 	try {
 		const response = await client.responses.create(
 			{
-				model: 'gpt-5.2',
+				model,
 				instructions,
 				input: 'Suggest a next prompt, or null.',
 				text: {
@@ -126,6 +130,14 @@ ${summarizeMemory(memory)}`;
 			},
 			signal ? {signal} : undefined,
 		);
+
+		if (response.usage) {
+			recordUsage(
+				model,
+				response.usage.input_tokens,
+				response.usage.output_tokens,
+			);
+		}
 
 		const parsed = JSON.parse(response.output_text) as {prompt: string | null};
 		const trimmed = parsed.prompt?.trim() ?? '';

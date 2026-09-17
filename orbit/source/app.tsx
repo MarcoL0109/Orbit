@@ -16,7 +16,11 @@ import {
 	readGlobalProjects,
 	removeKnownProject as removeGlobalProject,
 } from './registry/knownProjects.js';
-import {readGlobalUsage, estimateCostUsd} from './registry/usage.js';
+import {
+	readGlobalUsage,
+	estimateCostUsd,
+	totalTokens,
+} from './registry/usage.js';
 import {initOrbitProject} from './init/init.js';
 import type {InitFileAction} from './init/init.js';
 import {
@@ -1138,6 +1142,8 @@ Global memory updated:
 	// fresh every render so a call mid-run (see agentLoop.ts's onUsage)
 	// shows up here immediately, not just after the next full re-mount.
 	const usage = readGlobalUsage();
+	const usageTokens = totalTokens(usage);
+	const usageCost = estimateCostUsd(usage);
 
 	return (
 		<Box flexDirection="column">
@@ -1256,15 +1262,20 @@ Global memory updated:
 									<Text dimColor>Tokens (in / out)</Text>
 								</Box>
 								<Text>
-									{usage.inputTokens.toLocaleString()} /{' '}
-									{usage.outputTokens.toLocaleString()}
+									{usageTokens.inputTokens.toLocaleString()} /{' '}
+									{usageTokens.outputTokens.toLocaleString()}
 								</Text>
 							</Box>
 							<Box>
 								<Box width={24}>
 									<Text dimColor>Est. cost</Text>
 								</Box>
-								<Text>${estimateCostUsd(usage).toFixed(2)}</Text>
+								<Text>
+									${usageCost.totalUsd.toFixed(2)}
+									{usageCost.unpricedModels.length > 0
+										? ` (excludes ${usageCost.unpricedModels.join(', ')} — no known rate)`
+										: ''}
+								</Text>
 							</Box>
 							<Box>
 								<Box width={24}>

@@ -88,7 +88,7 @@ export async function runEnvironmentSetupAgent(
 
 		const turn: AgentTurnResult = await runAgentTurn<EnvironmentSetupContext>({
 			client,
-			model: 'gpt-5.2',
+			model: context.orbitConfig.environmentSetupModel ?? 'gpt-5.6-luna',
 			instructions,
 			input: nextInput,
 			previousResponseId,
@@ -98,7 +98,11 @@ export async function runEnvironmentSetupAgent(
 			steps,
 			onProgress: options.onProgress,
 			onUsage(usage) {
-				recordUsage(usage.inputTokens, usage.outputTokens);
+				recordUsage(
+					context.orbitConfig.environmentSetupModel ?? 'gpt-5.6-luna',
+					usage.inputTokens,
+					usage.outputTokens,
+				);
 			},
 		});
 

@@ -66,6 +66,21 @@ export type OrbitConfig = {
 	// rather than reconstructing it from trace/network archaeology
 	// afterward. See browserWorker.ts's launch() call.
 	headed: boolean;
+	// One model per agent, not a single shared setting — each does
+	// different work at a different cost/quality tradeoff (the main testing
+	// loop makes real judgment calls tool call after tool call; the last
+	// three are single-shot, narrowly-scoped calls with nothing to iterate
+	// on), so forcing them onto the same model means paying the loop's
+	// price everywhere or the classifier's quality everywhere. A config.json
+	// written before this field existed won't have these keys at all —
+	// readOrbitConfig doesn't backfill (see formatConfigFieldValue's own
+	// comment on the same gap for headed) — so every read site falls back
+	// to a hardcoded default rather than assuming the key is present.
+	testingModel: string;
+	chatModel: string;
+	environmentSetupModel: string;
+	classificationModel: string;
+	promptRecommendationModel: string;
 };
 
 export function getOrbitConfigPath(projectRoot: string): string {

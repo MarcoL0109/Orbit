@@ -2,6 +2,7 @@ import type {ResponseInputItem} from 'openai/resources/responses/responses';
 import {graphifyGraphExists} from '../projects/graphifyGraph.js';
 import {readProjectMap, type ProjectMap} from '../projects/scan.js';
 import {readProjectMemory, type ProjectMemory} from '../init/memory.js';
+import {readOrbitConfig} from '../init/config.js';
 import {recordUsage} from '../registry/usage.js';
 import type {CommandContext} from '../commands/context.js';
 import {createOpenAIClient, type ResponsesClient} from './client.js';
@@ -98,6 +99,8 @@ export async function runAskAgent(
 	const projectMap = readProjectMap(context.projectRoot);
 	const memory = readProjectMemory(context.projectRoot);
 	const instructions = buildSystemPrompt(projectMap, memory, hasExplainSymbol);
+	const model =
+		readOrbitConfig(context.projectRoot)?.chatModel ?? 'gpt-5.6-luna';
 
 	let previousResponseId: string | undefined;
 	let nextInput: string | ResponseInputItem[] = prompt;
@@ -109,7 +112,7 @@ export async function runAskAgent(
 
 		const turn: AgentTurnResult = await runAgentTurn<AskAgentContext>({
 			client,
-			model: 'gpt-5.2',
+			model,
 			instructions,
 			input: nextInput,
 			previousResponseId,
@@ -119,7 +122,7 @@ export async function runAskAgent(
 			steps,
 			onProgress: options.onProgress,
 			onUsage(usage) {
-				recordUsage(usage.inputTokens, usage.outputTokens);
+				recordUsage(model, usage.inputTokens, usage.outputTokens);
 			},
 		});
 
