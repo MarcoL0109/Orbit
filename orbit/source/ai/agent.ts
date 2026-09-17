@@ -357,7 +357,9 @@ ${
 		  })}
 
 Exploration graph (built from live browsing on past runs against this app — a hint, not ground truth; still verify live before trusting an edge, an app can change)
-${summarizeExplorationGraph(readExplorationGraph(context.projectRoot))}`
+${summarizeExplorationGraph(readExplorationGraph(context.projectRoot))}
+
+Treat the graph one hop at a time, not a whole path to walk on faith — use it to decide only your NEXT single action, take that one browser_action, then check the actual result against what the edge implied before deciding your following action. If a hop's real result doesn't match what the graph implied, stop following the graph from that point — later edges built from what used to follow it may be stale too, not just this one — and fall back to ordinary live exploration for the rest. Catching a stale edge on the first hop it diverges costs one wasted action; continuing to trust the graph deeper into a path that already proved wrong costs many.`
 		: summarizeMemory(memory)
 }
 

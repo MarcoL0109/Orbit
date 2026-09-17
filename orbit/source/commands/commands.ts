@@ -257,6 +257,15 @@ export async function startBlindProjectFlow(
 		return;
 	}
 
+	context.setMessages(previous => [
+		...previous,
+		{
+			role: 'system',
+			content: `${targetUrl} is reachable.`,
+			color: 'green',
+		},
+	]);
+
 	// Snapshotted right before context.project actually changes — whatever
 	// was active up to this exact point (a real project, another blind
 	// one, or nothing) is what toggling blind mode back off later should
