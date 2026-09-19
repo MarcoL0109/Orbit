@@ -19,6 +19,12 @@ import {
 	scanProjectWithModeSelection,
 	graphifyOutcomeMessage,
 } from '../projects/scanOrchestration.js';
+import {
+	refreshBrdFeaturesIfNeeded,
+	sortByPriority,
+	filterUncoveredFeatures,
+} from '../projects/brdFeatures.js';
+import type {BrdFeature} from '../ai/extractBrdFeatures.js';
 import type {CommandContext} from './context.js';
 import {reportError} from './error.js';
 
@@ -107,7 +113,7 @@ export async function runTestCommand(
 
 			if (alreadyReachable) {
 				context.markEnvironmentReady(context.project.root);
-			} else if (context.project.blind) {
+			} else if (orbitConfig.blind) {
 				// Blind mode never tries to discover or start an environment
 				// — there is no source here for a setup agent to read or run
 				// commands from (projectRoot is Orbit's own empty
@@ -275,7 +281,7 @@ export async function runTestCommand(
 		// project: there is no local source to scan, and running it would
 		// at best index Orbit's own generated files, at worst prompt the
 		// user for a scan mode (regex/graphify) that has no meaning here.
-		if (!context.project.blind) {
+		if (!orbitConfig.blind) {
 			try {
 				context.setAgentActivity('Scanning project for changes...');
 				const {projectMap, graphifyOutcome} =
@@ -299,6 +305,51 @@ export async function runTestCommand(
 					action: 'Pre-test project scan',
 					cause: error,
 				});
+			}
+		}
+
+		// Kept alongside the project scan, same reasoning: cheap when nothing
+		// changed (checksum-gated), non-fatal if it fails, and keeps
+		// brd-features.json current for the NEXT /test call whether or not
+		// this particular run is the one using it. A no-op when brdPath
+		// isn't configured.
+		if (orbitConfig.brdPath) {
+			try {
+				const refreshResult = await refreshBrdFeaturesIfNeeded(
+					context.project.root,
+					orbitConfig.brdPath,
+					orbitConfig.classificationModel,
+				);
+				if (!refreshResult.ok) {
+					context.setMessages(previous => [
+						...previous,
+						{
+							role: 'agent',
+							content: `BRD refresh skipped: ${refreshResult.error}`,
+							color: 'yellow',
+						},
+					]);
+				} else if (refreshResult.refreshed) {
+					context.setMessages(previous => [
+						...previous,
+						{
+							role: 'agent',
+							content: `BRD re-scanned: ${refreshResult.data.features.length} feature(s) extracted from ${orbitConfig.brdPath}.`,
+							color: 'gray',
+						},
+					]);
+				}
+			} catch (error) {
+				context.setMessages(previous => [
+					...previous,
+					{
+						role: 'agent',
+						content: `BRD refresh failed: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+						color: 'yellow',
+					},
+				]);
 			}
 		}
 
@@ -404,4 +455,141 @@ export async function runTestCommand(
 			reason: error instanceof Error ? error.message : String(error),
 		};
 	}
+}
+
+export type TestEverythingOutcome =
+	| {ran: true; featureCount: number}
+	| {ran: false; reason: string};
+
+const PRIORITY_SECTION_ORDER: BrdFeature['priority'][] = [
+	'must',
+	'should',
+	'could',
+	'unspecified',
+];
+
+// Numbered to match run order exactly (so "run 4 failed" is unambiguous
+// later), grouped under a priority heading so the shape of the batch is
+// visible at a glance — feature name and description on separate lines so
+// a long description never runs into the name. `features` must already be
+// sortByPriority'd; this only groups, it doesn't re-sort.
+function formatUncoveredFeaturesList(features: BrdFeature[]): string {
+	let index = 0;
+	const sections = PRIORITY_SECTION_ORDER.map(priority => {
+		const inSection = features.filter(f => f.priority === priority);
+		if (inSection.length === 0) return null;
+
+		const lines = inSection.map(feature => {
+			index += 1;
+			return `  ${index}. ${feature.feature}\n     ${feature.description}`;
+		});
+
+		return `${priority.toUpperCase()}\n${lines.join('\n')}`;
+	}).filter((section): section is string => section !== null);
+
+	return sections.join('\n\n');
+}
+
+// /test with no prompt: autonomously test every BRD feature not yet
+// covered, in priority order, instead of the user describing one feature
+// at a time. Each feature just becomes runTestCommand's own prompt — this
+// doesn't duplicate that logic, it drives it in a loop. See the design
+// conversation this followed: the list is always shown and approved as one
+// batch before anything runs, since each feature test has the same real,
+// permanent side effects (a real record created, a real test file written)
+// as any other /test run, just multiplied across however many are
+// uncovered.
+export async function runTestEverythingFromBrd(
+	context: CommandContext,
+	signal: AbortSignal,
+): Promise<TestEverythingOutcome> {
+	if (!context.project?.root) {
+		reportError(context.setMessages, {kind: 'no-project-selected'});
+		return {ran: false, reason: 'No project selected'};
+	}
+
+	const orbitConfig = context.project.hasOrbitFolder
+		? readOrbitConfig(context.project.root)
+		: null;
+
+	if (!orbitConfig) {
+		reportError(context.setMessages, {kind: 'project-not-initialized'});
+		return {
+			ran: false,
+			reason: 'Project is not initialized (run /init first)',
+		};
+	}
+
+	if (!orbitConfig.brdPath) {
+		reportError(context.setMessages, {
+			kind: 'invalid-arg-count',
+			usage: '/test <prompt>',
+			expected: 'at least 1 (or none, once a BRD is configured via /config)',
+			given: 0,
+		});
+		return {ran: false, reason: 'No BRD configured and no prompt given'};
+	}
+
+	context.setAgentActivity('Checking the BRD for changes...');
+	const refreshResult = await refreshBrdFeaturesIfNeeded(
+		context.project.root,
+		orbitConfig.brdPath,
+		orbitConfig.classificationModel,
+		undefined,
+		signal,
+	);
+
+	if (!refreshResult.ok) {
+		reportError(context.setMessages, {
+			kind: 'unexpected',
+			action: 'BRD extraction',
+			cause: new Error(refreshResult.error),
+		});
+		return {ran: false, reason: refreshResult.error};
+	}
+
+	const brdFeatures = refreshResult.data;
+	const uncovered = sortByPriority(
+		filterUncoveredFeatures(
+			context.project.root,
+			orbitConfig.testDir,
+			brdFeatures.features,
+		),
+	);
+
+	if (uncovered.length === 0) {
+		context.setMessages(previous => [
+			...previous,
+			{
+				role: 'agent',
+				content: `Every feature in the BRD (${brdFeatures.features.length} total) already has a covering test — nothing to run.`,
+				color: 'green',
+			},
+		]);
+		return {ran: true, featureCount: 0};
+	}
+
+	context.setMessages(previous => [
+		...previous,
+		{
+			role: 'agent',
+			content: `${uncovered.length} uncovered feature(s) from the BRD, in the order they'll run:\n\n${formatUncoveredFeaturesList(
+				uncovered,
+			)}`,
+		},
+	]);
+
+	const approved = await context.requestApproval(
+		`Run ${uncovered.length} test(s) for the features above? Each writes a real test file and runs it against the live app.`,
+	);
+	if (!approved) {
+		return {ran: false, reason: 'User declined to run the batch'};
+	}
+
+	for (const feature of uncovered) {
+		if (signal.aborted) break;
+		await runTestCommand(feature.description, context, signal);
+	}
+
+	return {ran: true, featureCount: uncovered.length};
 }

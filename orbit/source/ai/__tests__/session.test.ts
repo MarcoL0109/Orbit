@@ -32,6 +32,7 @@ function fakeConfig(overrides: Partial<OrbitConfig> = {}): OrbitConfig {
 		environmentSetupModel: 'gpt-5.2',
 		classificationModel: 'gpt-5.2',
 		promptRecommendationModel: 'gpt-5.2',
+		brdPath: null,
 		...overrides,
 	};
 }

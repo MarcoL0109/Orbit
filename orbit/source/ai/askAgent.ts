@@ -17,8 +17,15 @@ import {readFileTool} from './tools/readFile.js';
 import {explainSymbolTool} from './tools/explainSymbol.js';
 import {checkMemoryTool} from './tools/checkMemory.js';
 import {checkCoverageTool} from './tools/checkCoverage.js';
+import {checkUsageTool} from './tools/checkUsage.js';
 import {refreshProjectScanTool} from './tools/refreshProjectScan.js';
 import {runTestCommandTool} from './tools/runTestCommandTool.js';
+import {listCommandsTool} from './tools/listCommands.js';
+import {listProjectsTool} from './tools/listProjects.js';
+import {clearConversationTool} from './tools/clearConversation.js';
+import {setConfigTool} from './tools/setConfig.js';
+import {resetUsageTool} from './tools/resetUsage.js';
+import {deinitProjectTool} from './tools/deinitProject.js';
 import type {ToolDefinition} from './tools/types.js';
 
 // Extends the full CommandContext (not a narrower subset) because
@@ -49,18 +56,50 @@ const baseToolRegistry: Array<ToolDefinition<any, any, AskAgentContext>> = [
 	readFileTool,
 	checkMemoryTool,
 	checkCoverageTool,
+	checkUsageTool,
 	refreshProjectScanTool,
 	runTestCommandTool,
+	listCommandsTool,
+	listProjectsTool,
+	clearConversationTool,
+	setConfigTool,
+	resetUsageTool,
+	deinitProjectTool,
 ];
 
 function buildSystemPrompt(
 	projectMap: ProjectMap | null,
 	memory: ProjectMemory,
 	hasExplainSymbol: boolean,
+	blind: boolean,
 ): string {
+	const readOnlyToolNames = [
+		'check_memory',
+		...(blind ? [] : ['check_coverage']),
+		'check_usage',
+		'refresh_project_scan',
+		'list_commands',
+		'list_projects',
+		'clear_conversation',
+	];
+	const approvalRequiredToolNames = [
+		'run_test_command',
+		'set_config',
+		'reset_usage',
+		'deinit_project',
+	];
+
 	return `You are Orbit, an AI QA agent for E2E testing. Right now you are in ASK mode, not test mode: the user typed a plain question rather than a /test request, so your only job is to answer it using what you can find out about this project.
 
-Beyond read_file/explain_symbol, you also have Orbit's own commands as tools: check_memory, check_coverage, refresh_project_scan, and run_test_command (the real /test — writes a real test file and runs it against the live app). The first three are read-only and never ask for approval, same as if the user ran them directly. run_test_command is the one exception: because it has real effects on the live app and the project's own test files, every single call to it asks the user for approval first, with no way around it — use it only when the question genuinely can't be answered any other way (e.g. the user is explicitly asking you to verify or test something live), not as a first resort. Each of these commands already shows its own normal output in the chat as it runs, exactly as if the user had typed it themselves — you don't need to repeat that output back, just build your own answer on top of what it told you.
+Beyond read_file/explain_symbol, you also have Orbit's own commands as tools. Read-only, never ask for approval, same as if the user ran them directly: ${readOnlyToolNames.join(
+		', ',
+	)}. Have real effects and ALWAYS ask the user for approval first, with no exceptions: ${approvalRequiredToolNames.join(
+		', ',
+	)} — run_test_command writes a real test file and runs it against the live app; set_config changes a real project setting (including ones that control approval behavior itself); reset_usage permanently zeroes tracked usage; deinit_project permanently deletes the current project's entire .orbit context. Only reach for one of these when the user's request genuinely requires it (they're explicitly asking to test/verify something live, change a setting, reset usage, or delete project context) — never as a first resort, and never chain multiple approval-required calls together without the user having asked for each. set_config cannot toggle blind mode — that starts a different project entirely, not a field edit, and isn't available here.${
+		blind
+			? ' check_coverage is not available in this blind project — it needs a structural project map (routes/components from real source) that a blind project never has, since there is no source to read.'
+			: ''
+	} Each of these commands already shows its own normal output in the chat as it runs, exactly as if the user had typed it themselves — you don't need to repeat that output back, just build your own answer on top of what it told you.
 
 ${summarizeProjectMap(projectMap, [])}
 
@@ -89,16 +128,31 @@ export async function runAskAgent(
 	const steps: AgentStep[] = [];
 
 	const hasExplainSymbol = graphifyGraphExists(context.projectRoot);
-	const activeToolRegistry = hasExplainSymbol
-		? [...baseToolRegistry, explainSymbolTool]
+	const blind = Boolean(context.project?.blind);
+	// check_coverage needs a structural project map (routes/components from
+	// real source) that a blind project never has — same reasoning read_file
+	// gets excluded in blind mode for the testing agent (agent.ts). Excluded
+	// here, not left to silently fall through to check_coverage's own "no
+	// project index yet" message, so the tool's own description (and this
+	// prompt's tool list) never claims something not actually available.
+	const withoutCoverageIfBlind = blind
+		? baseToolRegistry.filter(tool => tool.name !== 'check_coverage')
 		: baseToolRegistry;
+	const activeToolRegistry = hasExplainSymbol
+		? [...withoutCoverageIfBlind, explainSymbolTool]
+		: withoutCoverageIfBlind;
 
 	// Read once, not per-turn — unlike the testing agent, nothing here
 	// writes to the project mid-run, so the map/memory can't go stale
 	// between turns of the same ask.
 	const projectMap = readProjectMap(context.projectRoot);
 	const memory = readProjectMemory(context.projectRoot);
-	const instructions = buildSystemPrompt(projectMap, memory, hasExplainSymbol);
+	const instructions = buildSystemPrompt(
+		projectMap,
+		memory,
+		hasExplainSymbol,
+		blind,
+	);
 	const model =
 		readOrbitConfig(context.projectRoot)?.chatModel ?? 'gpt-5.6-luna';
 

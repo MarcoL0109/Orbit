@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import {getOrbitDir} from '../init/orbitDir.js';
+import {getStorageStatePath} from './tools/writeAuthSetup.js';
 
 export type BrowserWorkerCommand =
 	| {action: 'navigate'; url: string}
@@ -54,9 +55,16 @@ export type BrowserWorkerCommand =
 
 export type ApiCall = {
 	url: string;
+	method: string;
 	status: number;
 	statusText: string;
 	ok: boolean;
+	// What was actually sent, not just what came back — without this the
+	// agent can see that a save succeeded but never what shape the request
+	// itself needed (which fields, what a computed one looked like once
+	// settled). Undefined for a GET/request with no body, same as `body`
+	// above is undefined when the response has none.
+	requestBody?: string;
 	body?: string;
 };
 
@@ -123,12 +131,39 @@ function buildBrowserWorkerSource(
 	browserName: 'chromium' | 'firefox' | 'webkit',
 	baseUrl: string,
 	headed: boolean,
+	// Opportunistic, not guaranteed-fresh — unlike run_test.ts (which
+	// re-runs auth.setup.ts fresh before every real run), exploration has
+	// no equivalent "re-login before every session" step, since doing that
+	// would just move the exact redundant-login problem this exists to fix
+	// from the written tests onto every feature's own exploration instead.
+	// If this session turns out to be stale, the model already handles that
+	// the same way it always has — it sees a login page when it wasn't
+	// expecting one and logs in live, exactly as with no storageState at
+	// all. Never worse than before this existed, frequently better. Passed
+	// as a path, not inlined content, so a worker respawned mid-run (see
+	// isAlive()) picks up whatever the file holds at that moment rather
+	// than a snapshot taken when this string was first built.
+	storageStatePath: string | null,
 ): string {
 	return `import { ${browserName} as launchBrowser } from 'playwright';
+import fs from 'node:fs';
 import readline from 'node:readline';
 
 const baseURL = ${JSON.stringify(baseUrl)};
 const headless = ${JSON.stringify(!headed)};
+const storageStatePath = ${JSON.stringify(storageStatePath)};
+
+function contextOptions() {
+  const options = { baseURL, locale: 'en-US' };
+  // Re-checked live (not just once at startup) — the file can appear
+  // between this worker starting and a later 'reset' if write_auth_setup
+  // runs mid-session, and a worker that only ever checked once would never
+  // pick that up without being killed and respawned.
+  if (storageStatePath && fs.existsSync(storageStatePath)) {
+    options.storageState = storageStatePath;
+  }
+  return options;
+}
 
 let browser = null;
 let context = null;
@@ -167,7 +202,7 @@ async function ensurePage() {
   // actual test run (run_test's generated config) must agree, or a
   // selector verified live can be verifying the wrong language's page
   // entirely. See the matching 'locale' in runTest.ts's generated config.
-  if (!context) context = await browser.newContext({baseURL, locale: 'en-US'});
+  if (!context) context = await browser.newContext(contextOptions());
   if (!page) {
     page = await context.newPage();
 
@@ -186,8 +221,14 @@ async function ensurePage() {
       if (resourceType !== 'xhr' && resourceType !== 'fetch') return;
 
       const status = response.status();
+      const request = response.request();
       pendingApiCalls.push({
         url: response.url(),
+        // postData() is synchronous and never throws — safe to read
+        // directly, unlike the response body which needs the async/
+        // best-effort handling below.
+        method: request.method(),
+        requestBody: request.postData() ?? undefined,
         status,
         statusText: response.statusText(),
         ok: status < 400,
@@ -240,16 +281,22 @@ async function drainCapturedEvents() {
   pendingWebSocketMessages = [];
 
   const resolvedApiCalls = await Promise.all(
-    apiCalls.map(async ({url, status, statusText, ok, bodyPromise}) => {
-      const body = await bodyPromise;
-      return {
-        url,
-        status,
-        statusText,
-        ok,
-        body: body ? body.slice(0, MAX_CAPTURED_TEXT_CHARS) : undefined,
-      };
-    }),
+    apiCalls.map(
+      async ({url, method, requestBody, status, statusText, ok, bodyPromise}) => {
+        const body = await bodyPromise;
+        return {
+          url,
+          method,
+          requestBody: requestBody
+            ? requestBody.slice(0, MAX_CAPTURED_TEXT_CHARS)
+            : undefined,
+          status,
+          statusText,
+          ok,
+          body: body ? body.slice(0, MAX_CAPTURED_TEXT_CHARS) : undefined,
+        };
+      },
+    ),
   );
 
   return {
@@ -375,7 +422,7 @@ async function handle(command) {
     case 'reset': {
       await ensureBrowser();
       if (context) await context.close();
-      context = await browser.newContext({baseURL, locale: 'en-US'});
+      context = await browser.newContext(contextOptions());
       page = null;
       lastSnapshot = null;
       // These are module-level, not tied to the page object itself, so
@@ -440,6 +487,7 @@ export function spawnBrowserWorker(
 			resolveBrowserName(defaultBrowser),
 			baseUrl,
 			headed,
+			getStorageStatePath(projectRoot),
 		),
 		'utf8',
 	);

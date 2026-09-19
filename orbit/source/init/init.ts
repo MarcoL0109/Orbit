@@ -281,6 +281,7 @@ export function initOrbitProject({
 			environmentSetupModel: 'gpt-5.6-luna',
 			classificationModel: 'gpt-5.4-nano',
 			promptRecommendationModel: 'gpt-5.4-nano',
+			brdPath: null,
 		} satisfies OrbitConfig),
 
 		// Neither file gets scaffolded for a blind project — both are pure

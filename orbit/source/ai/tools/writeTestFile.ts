@@ -4,12 +4,14 @@ import {checksumFromContent} from '../../projects/checksum.js';
 import {recordClassification} from '../../projects/featureClassification.js';
 import {resolveConfiguredDir} from '../../init/config.js';
 import {findUnverifiedNames} from '../verifiedSelectors.js';
+import {findFragileCountAssertions} from './fragileAssertions.js';
 import type {ToolDefinition} from './types.js';
 
 type WriteTestFileArgs = {
 	relativePath: string;
 	content: string;
 	features: string[];
+	requiresFreshSession: boolean;
 };
 
 type WriteTestFileData = {
@@ -41,10 +43,18 @@ export const writeTestFileTool: ToolDefinition<
 				description:
 					'The feature(s) this test file covers, using short lowercase dot-separated names (e.g. ["checkout.payment", "checkout.shipping"]) — you already know this, since you\'re the one writing it. List every sub-feature if this file groups more than one. Used for coverage tracking.',
 			},
+			requiresFreshSession: {
+				type: 'boolean',
+				description:
+					'true only if this test\'s own subject is login/authentication/session behavior itself (e.g. verifying login succeeds or fails, session expiry, logout) — almost always false. When true, run_test skips the shared pre-authenticated storageState for this file and lets it start from a genuinely fresh, logged-out browser, so it actually exercises what it claims to test rather than starting already signed in. Every other feature (creating, editing, searching, anything that merely NEEDS to be logged in to run) should be false and rely on the shared authenticated session instead of writing its own login steps.',
+			},
 		},
-		required: ['relativePath', 'content', 'features'],
+		required: ['relativePath', 'content', 'features', 'requiresFreshSession'],
 	},
-	async execute({relativePath, content, features}, context) {
+	async execute(
+		{relativePath, content, features, requiresFreshSession},
+		context,
+	) {
 		const testDirResolution = resolveConfiguredDir(
 			context.projectRoot,
 			context.orbitConfig.testDir,
@@ -90,6 +100,20 @@ export const writeTestFileTool: ToolDefinition<
 			}
 		}
 
+		// Applies in every mode, not just blind — this isn't about missing
+		// source to verify against, it's about a specific mistake the model
+		// makes regardless of how much project context it has (see
+		// fragileAssertions.ts).
+		const fragileAssertions = findFragileCountAssertions(content);
+		if (fragileAssertions.length > 0) {
+			return {
+				ok: false,
+				error: `This test contains an assertion that treats shared, mutable backend data as a fixed fact: ${fragileAssertions.join(
+					'; ',
+				)}. You have no database access, so don't hardcode what the real total is — read it live instead: parse the pager's own current total from its text (don't assert it equals a literal number), paginate through every page collecting every row, assert each row actually matches what you searched for, then assert the number of rows you collected equals the total you read — that's a completeness check that's stable forever because both sides come from this same run. Also create your own record tagged with something unique to this run and confirm it's among the collected rows, to prove the results are live, not stale. Rewrite the assertion and call write_test_file again.`,
+			};
+		}
+
 		if (context.orbitConfig.writeMode === 'ask') {
 			const approved = await context.requestApproval(
 				`Write test file: ${path.relative(context.projectRoot, resolved)}`,
@@ -121,6 +145,7 @@ export const writeTestFileTool: ToolDefinition<
 			path.relative(context.projectRoot, resolved),
 			checksumFromContent(content),
 			features,
+			requiresFreshSession,
 		);
 
 		return {ok: true, data: {path: resolved}};

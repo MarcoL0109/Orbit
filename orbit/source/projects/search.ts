@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import {readOrbitConfig} from '../init/config.js';
 
 type ProjectDetectionResult = {
 	isProject: boolean;
@@ -11,7 +12,33 @@ type ProjectDetectionResult = {
 	framework?: string;
 	testFramework?: string;
 	hasOrbitFolder: boolean;
+	// Only meaningful when hasOrbitFolder is true — read from the project's
+	// own persisted config, not re-derived here. Structural marker detection
+	// alone has no way to know a directory is a blind workspace (it looks
+	// exactly like any other initialized project on disk); every consumer
+	// of a ProjectInfo/ProjectDetectionResult (blind-mode tool filtering,
+	// the pre-test scan gate, environment-setup's blind refusal) depends on
+	// this being right at the moment a project is first discovered, not
+	// just when it was explicitly switched into via startBlindProjectFlow.
+	blind?: boolean;
+	targetUrl?: string;
 };
+
+// Reads the two fields structural detection has no way to know on its own.
+// Never throws: a missing/unreadable config just means blind/targetUrl stay
+// unset, same as before this existed — callers already treat those as
+// optional.
+function readBlindFields(
+	projectRoot: string,
+	hasOrbitFolder: boolean,
+): {blind?: boolean; targetUrl?: string} {
+	if (!hasOrbitFolder) return {};
+
+	const orbitConfig = readOrbitConfig(projectRoot);
+	if (!orbitConfig?.blind) return {};
+
+	return {blind: true, targetUrl: orbitConfig.baseUrl};
+}
 
 const ROOT_MARKERS = [
 	'.orbit',
@@ -115,16 +142,20 @@ export function detectProjectRoot(
 
 		if (hasRootMarker(markers)) {
 			const confidence = scoreMarkers(markers);
+			const isProject = confidence >= 40;
+			const hasOrbitFolder =
+				markers.includes('.orbit') || markers.includes('orbit');
 
 			return {
-				isProject: confidence >= 40,
-				root: confidence >= 40 ? currentDir : null,
+				isProject,
+				root: isProject ? currentDir : null,
 				confidence,
 				markers,
 				packageManager: detectPackageManager(markers),
 				framework: detectFramework(markers),
 				testFramework: detectTestFramework(markers),
-				hasOrbitFolder: markers.includes('.orbit') || markers.includes('orbit'),
+				hasOrbitFolder,
+				...(isProject ? readBlindFields(currentDir, hasOrbitFolder) : {}),
 			};
 		}
 
@@ -175,6 +206,7 @@ export function detectProjectAtPath(
 	}
 
 	const markers = getMarkers(resolved);
+	const hasOrbitFolder = markers.includes('.orbit') || markers.includes('orbit');
 
 	return {
 		isProject: true,
@@ -184,7 +216,8 @@ export function detectProjectAtPath(
 		packageManager: detectPackageManager(markers),
 		framework: detectFramework(markers),
 		testFramework: detectTestFramework(markers),
-		hasOrbitFolder: markers.includes('.orbit') || markers.includes('orbit'),
+		hasOrbitFolder,
+		...readBlindFields(resolved, hasOrbitFolder),
 	};
 }
 

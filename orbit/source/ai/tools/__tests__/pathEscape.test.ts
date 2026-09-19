@@ -41,6 +41,7 @@ function fakeConfig(overrides: Partial<OrbitConfig> = {}): OrbitConfig {
 		environmentSetupModel: 'gpt-5.2',
 		classificationModel: 'gpt-5.2',
 		promptRecommendationModel: 'gpt-5.2',
+		brdPath: null,
 		...overrides,
 	};
 }
@@ -140,6 +141,7 @@ test('write_test_file rejects a relativePath that escapes the configured test di
 			relativePath: '../../../etc/passwd',
 			content: 'test content',
 			features: ['example'],
+			requiresFreshSession: false,
 		},
 		fakeContext(projectRoot, orbitConfig),
 	);
@@ -161,6 +163,7 @@ test('write_test_file accepts a relativePath that stays inside the test director
 			relativePath: 'login.spec.ts',
 			content: 'test content',
 			features: ['example'],
+			requiresFreshSession: false,
 		},
 		fakeContext(projectRoot, orbitConfig),
 	);

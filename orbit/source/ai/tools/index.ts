@@ -1,6 +1,7 @@
 import type {FunctionTool} from 'openai/resources/responses/responses';
 import {readFileTool} from './readFile.js';
 import {writeTestFileTool} from './writeTestFile.js';
+import {writeAuthSetupTool} from './writeAuthSetup.js';
 import {runTestTool} from './runTest.js';
 import {reportResultTool} from './reportResult.js';
 import {browserActionTool} from './browserAction.js';
@@ -12,6 +13,7 @@ import type {ToolDefinition} from './types.js';
 export const toolRegistry: ToolDefinition[] = [
 	readFileTool,
 	writeTestFileTool,
+	writeAuthSetupTool,
 	runTestTool,
 	reportResultTool,
 	browserActionTool,

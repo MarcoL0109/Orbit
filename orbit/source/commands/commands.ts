@@ -48,7 +48,7 @@ import {
 	estimateCostUsd,
 	totalTokens,
 } from '../registry/usage.js';
-import {runTestCommand} from './testCommand.js';
+import {runTestCommand, runTestEverythingFromBrd} from './testCommand.js';
 import type {CommandContext} from './context.js';
 import {reportError, type ArgCountRule} from './error.js';
 
@@ -57,122 +57,16 @@ export {
 	type TestCommandOutcome,
 } from './testCommand.js';
 
-// /config's editable fields — deliberately a subset of OrbitConfig.
-// dockerComposeFile and dockerComposeHasHealthchecks are auto-detected
-// facts, not preferences; testDir/manualTestDir are conventions other code
-// paths assume are stable. scanMode IS included despite already having its
-// own flow (/scan's picker) — that picker only ever fires once, while
-// scanMode is still null; once it's set (correctly or by mistake, e.g. a
-// stray keypress during the picker) there is otherwise no way to change it
-// short of deleting .orbit/config.json by hand or a destructive
-// /deinit + /init. Picking a new value here only persists the choice —
-// the actual graphify build/install still only happens on the next real
-// scan, exactly as if /scan's picker had been answered this way.
-export type ConfigFieldDescriptor =
-	| {key: 'approvalMode'; label: string; kind: 'enum'; options: string[]}
-	| {key: 'writeMode'; label: string; kind: 'enum'; options: string[]}
-	| {key: 'defaultBrowser'; label: string; kind: 'enum'; options: string[]}
-	| {key: 'scanMode'; label: string; kind: 'enum'; options: string[]}
-	| {key: 'baseUrl'; label: string; kind: 'text'; nullable: false}
-	| {key: 'testCommand'; label: string; kind: 'text'; nullable: true}
-	| {key: 'environmentSetupRoot'; label: string; kind: 'text'; nullable: true}
-	| {key: 'maxRepairAttempts'; label: string; kind: 'number'}
-	| {key: 'devCommands'; label: string; kind: 'csv'}
-	| {key: 'headed'; label: string; kind: 'boolean'}
-	| {key: 'testingModel'; label: string; kind: 'text'; nullable: false}
-	| {key: 'chatModel'; label: string; kind: 'text'; nullable: false}
-	| {
-			key: 'environmentSetupModel';
-			label: string;
-			kind: 'text';
-			nullable: false;
-	  }
-	| {key: 'classificationModel'; label: string; kind: 'text'; nullable: false}
-	| {
-			key: 'promptRecommendationModel';
-			label: string;
-			kind: 'text';
-			nullable: false;
-	  };
-
-export const CONFIG_FIELDS: ConfigFieldDescriptor[] = [
-	{
-		key: 'approvalMode',
-		label: 'Approval mode',
-		kind: 'enum',
-		options: ['ask', 'always'],
-	},
-	{
-		key: 'writeMode',
-		label: 'Write mode',
-		kind: 'enum',
-		options: ['ask', 'always'],
-	},
-	{
-		key: 'defaultBrowser',
-		label: 'Default browser',
-		kind: 'enum',
-		options: ['chromium', 'firefox', 'webkit'],
-	},
-	{
-		key: 'scanMode',
-		label: 'Scan mode',
-		kind: 'enum',
-		options: ['regex', 'graphify'],
-	},
-	{key: 'baseUrl', label: 'Base URL', kind: 'text', nullable: false},
-	{key: 'testCommand', label: 'Test command', kind: 'text', nullable: true},
-	{
-		key: 'environmentSetupRoot',
-		label: 'Environment setup root',
-		kind: 'text',
-		nullable: true,
-	},
-	{key: 'maxRepairAttempts', label: 'Max repair attempts', kind: 'number'},
-	{key: 'devCommands', label: 'Dev commands', kind: 'csv'},
-	{key: 'headed', label: 'Display browser window', kind: 'boolean'},
-	{
-		key: 'testingModel',
-		label: 'Testing agent model',
-		kind: 'text',
-		nullable: false,
-	},
-	{key: 'chatModel', label: 'Chat agent model', kind: 'text', nullable: false},
-	{
-		key: 'environmentSetupModel',
-		label: 'Environment setup agent model',
-		kind: 'text',
-		nullable: false,
-	},
-	{
-		key: 'classificationModel',
-		label: 'Feature classification model',
-		kind: 'text',
-		nullable: false,
-	},
-	{
-		key: 'promptRecommendationModel',
-		label: 'Prompt suggestion model',
-		kind: 'text',
-		nullable: false,
-	},
-];
-
-export function formatConfigFieldValue(
-	config: OrbitConfig,
-	field: ConfigFieldDescriptor,
-): string {
-	const value = config[field.key];
-	// undefined alongside null: OrbitConfig types these fields as always
-	// present, but a config.json written before a field existed won't have
-	// the key at all — readOrbitConfig doesn't backfill, so this is the
-	// only place that actually sees the gap.
-	if (value === null || value === undefined) return '(none)';
-	if (Array.isArray(value))
-		return value.length > 0 ? value.join(', ') : '(none)';
-	if (field.kind === 'boolean') return value ? 'Yes' : 'No';
-	return String(value);
-}
+// Moved to configFields.ts to break a circular import (set_config needs
+// these without pulling in this whole module) — imported normally for use
+// within this file, and re-exported so every existing import from
+// './commands.js' keeps working unchanged.
+import {
+	type ConfigFieldDescriptor,
+	CONFIG_FIELDS,
+	formatConfigFieldValue,
+} from './configFields.js';
+export {type ConfigFieldDescriptor, CONFIG_FIELDS, formatConfigFieldValue};
 
 // Only ever refreshes graphify — never triggers the interactive
 // mode-selection prompt /scan and /test use, since a question typed as a
@@ -577,16 +471,20 @@ Available Orbit commands:
 	{
 		name: 'test',
 		description:
-			'Generate and run a Playwright test for a feature you describe',
-		usage: '/test <prompt>',
-		argsRule: {min: 1},
+			'Generate and run a Playwright test for a feature you describe — or, with no prompt and a BRD configured, autonomously test every uncovered feature from it',
+		usage: '/test [prompt]',
+		argsRule: {min: 0},
 		async handler(_args, context) {
 			const prompt = _args.join(' ').trim();
 
 			try {
 				context.setIsThinking(true);
 				const controller = context.startAbortableTask();
-				await runTestCommand(prompt, context, controller.signal);
+				if (prompt === '') {
+					await runTestEverythingFromBrd(context, controller.signal);
+				} else {
+					await runTestCommand(prompt, context, controller.signal);
+				}
 			} finally {
 				context.setIsThinking(false);
 				context.setAgentActivity(null);

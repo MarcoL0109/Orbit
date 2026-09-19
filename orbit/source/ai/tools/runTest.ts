@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {resolveConfiguredDir} from '../../init/config.js';
 import {getOrbitDir} from '../../init/orbitDir.js';
+import {readFeatureClassifications} from '../../projects/featureClassification.js';
+import {getAuthSetupPath, getStorageStatePath} from './writeAuthSetup.js';
 import type {ToolDefinition} from './types.js';
 
 export type TestFailureDetail = {
@@ -58,12 +60,28 @@ function buildOrbitPlaywrightConfigSource(
 	testDirAbsolute: string,
 	baseUrl: string,
 	outputDirAbsolute: string,
+	// Set only when this run should start pre-authenticated — omitted
+	// entirely (not just left undefined in `use`) for the auth-setup run
+	// itself (which needs a genuinely fresh, logged-out context to log in
+	// from) and for any run where storageState doesn't apply, rather than
+	// pointing at a file that doesn't exist yet or shouldn't be used. See
+	// run_test's own decision of when to pass this.
+	storageStatePath: string | null,
+	// Playwright's own default testMatch only matches *.spec.ts/*.test.ts —
+	// auth.setup.ts doesn't fit that pattern and is silently excluded even
+	// when passed as an explicit CLI argument, confirmed directly (a real
+	// run against it reported "No tests found" despite the file existing
+	// and being named on the command line). Only the auth-setup run itself
+	// needs this override; the real test run keeps Playwright's own default.
+	testMatch: string | null = null,
 ): string {
 	return `import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: ${JSON.stringify(testDirAbsolute)},
-  outputDir: ${JSON.stringify(outputDirAbsolute)},
+  outputDir: ${JSON.stringify(outputDirAbsolute)},${
+			testMatch ? `\n  testMatch: ${testMatch},` : ''
+		}
   // Playwright's own default (30s) is sized for a typical unit-style test
   // against a mocked/local backend. Orbit tests a real, running app end to
   // end — login, navigation, and every search/select round-trip all hit a
@@ -72,7 +90,25 @@ export default defineConfig({
   // real failure: a well-formed generated test hit exactly this 30s
   // ceiling while still correctly waiting on a save response that simply
   // hadn't arrived yet, not because anything was actually broken.
-  timeout: 60_000,
+  timeout: 60_000,${
+			storageStatePath
+				? `
+  // Every worker that loads the same storageState file replays the exact
+  // same session cookie — meaning they all share ONE authenticated session
+  // on the real backend, not just the same client-side browser state. An
+  // app that keeps any server-side "current" state tied to that session
+  // (e.g. Odoo's own last-visited menu, restored on the next page load) can
+  // then race across workers: one worker's navigation can silently change
+  // what another worker's next page load lands on. Confirmed directly: a
+  // written test that navigated to the root URL then clicked an
+  // app-switcher tile timed out running in parallel with two sibling
+  // tests sharing the same storageState, then passed cleanly, unchanged,
+  // run alone — a real cross-worker race, not a flaky selector. Running
+  // serially whenever a shared session is in play trades some wall-clock
+  // time for actually deterministic results.
+  workers: 1,`
+				: ''
+		}
   use: {
     baseURL: ${JSON.stringify(baseUrl)},
     // Pinned explicitly to match browserWorker.ts's exploration context —
@@ -85,10 +121,147 @@ export default defineConfig({
     locale: 'en-US',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    video: 'retain-on-failure',${
+			storageStatePath
+				? `\n    storageState: ${JSON.stringify(storageStatePath)},`
+				: ''
+		}
   },
 });
 `;
+}
+
+// requiresFreshSession is stored keyed by path relative to projectRoot (see
+// writeTestFile.ts's own recordClassification call) — filePath here is
+// relative to testDir, so this re-derives the same key rather than assuming
+// they match.
+function fileRequiresFreshSession(
+	projectRoot: string,
+	testDirAbsolute: string,
+	filePath: string,
+): boolean {
+	const relativeToProjectRoot = path.relative(
+		projectRoot,
+		path.resolve(testDirAbsolute, filePath),
+	);
+	const entry =
+		readFeatureClassifications(projectRoot).entries[relativeToProjectRoot];
+	return entry?.requiresFreshSession ?? false;
+}
+
+// Whether ANY known test needs a genuinely fresh session — used only for a
+// whole-suite run (filePath: null), where a single shared config can't give
+// different tests different storageState the way a scoped single-file run
+// can. Erring toward "skip storageState for the whole run" rather than
+// silently force-authenticating a login test is the safe direction: a test
+// that didn't need storageState just does its own login again, same as
+// before this existed; a login test force-started pre-authenticated would
+// never actually exercise what it's testing.
+function anyKnownFileRequiresFreshSession(projectRoot: string): boolean {
+	const entries = Object.values(
+		readFeatureClassifications(projectRoot).entries,
+	);
+	return entries.some(entry => entry.requiresFreshSession);
+}
+
+// Runs the shared auth.setup.ts (if one has been written) and produces
+// storage-state.json for the real run to point at. Returns null (not an
+// error) when there's simply no auth setup yet — the very first test in a
+// project, before write_auth_setup has ever been called, has nothing to run
+// this against, and that's expected, not a failure. Returns an actual error
+// only when auth.setup.ts EXISTS but fails to run, since proceeding to the
+// real test with a missing/stale storageState at that point would produce a
+// confusing downstream failure instead of the real, attributable one.
+async function runAuthSetupIfNeeded(
+	binPath: string,
+	projectRoot: string,
+	baseUrl: string,
+	indexDir: string,
+	signal: AbortSignal,
+): Promise<{ok: true; storageStatePath: string | null} | {ok: false; error: string}> {
+	const authSetupPath = getAuthSetupPath(projectRoot);
+	if (!fs.existsSync(authSetupPath)) {
+		return {ok: true, storageStatePath: null};
+	}
+
+	const runId = `auth-setup-${Date.now()}`;
+	const outputDirAbsolute = path.join(orbitTracesDir(projectRoot), runId);
+	fs.mkdirSync(outputDirAbsolute, {recursive: true});
+
+	const configPath = path.join(indexDir, 'auth-setup.playwright.config.mjs');
+	fs.writeFileSync(
+		configPath,
+		// No storageState on this run itself — it needs a genuinely fresh,
+		// logged-out context to log in from, same reasoning a
+		// requiresFreshSession test does.
+		buildOrbitPlaywrightConfigSource(
+			indexDir,
+			baseUrl,
+			outputDirAbsolute,
+			null,
+			'/.*\\.setup\\.ts$/',
+		),
+		'utf8',
+	);
+
+	const storageStatePath = getStorageStatePath(projectRoot);
+	const reportPath = path.join(outputDirAbsolute, 'report.json');
+
+	try {
+		await runPlaywrightProcess(
+			binPath,
+			['test', '--config', configPath, '--reporter=json', authSetupPath],
+			projectRoot,
+			{
+				...process.env,
+				PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath,
+				ORBIT_STORAGE_STATE_PATH: storageStatePath,
+			},
+			signal,
+		);
+	} catch (error) {
+		return {
+			ok: false,
+			error: `Auth setup failed to run: ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+		};
+	}
+
+	if (!fs.existsSync(reportPath)) {
+		return {
+			ok: false,
+			error: 'Auth setup did not produce a JSON report — it may have failed to start.',
+		};
+	}
+
+	const result = parsePlaywrightJsonReport(
+		fs.readFileSync(reportPath, 'utf8'),
+		reportPath,
+	);
+	if (!result.passed) {
+		const failure = result.failures[0];
+		return {
+			ok: false,
+			error: `Auth setup failed: ${
+				failure?.errorMessage ?? 'unknown error'
+			} — fix it with write_auth_setup before running other tests, since they depend on the session it produces.`,
+		};
+	}
+
+	if (!fs.existsSync(storageStatePath)) {
+		return {
+			ok: false,
+			error:
+				'Auth setup passed but never wrote storage-state.json — its content must call page.context().storageState({ path: process.env.ORBIT_STORAGE_STATE_PATH }) as its final action.',
+		};
+	}
+
+	return {ok: true, storageStatePath};
+}
+
+function orbitTracesDir(projectRoot: string): string {
+	return path.join(getOrbitDir(projectRoot), 'traces');
 }
 
 async function runPlaywrightProcess(
@@ -355,6 +528,31 @@ export const runTestTool: ToolDefinition<RunTestArgs, RunTestResult> = {
 		const testDirAbsolute = testDirResolution.path;
 		const orbitDir = getOrbitDir(context.projectRoot);
 		const indexDir = path.join(orbitDir, 'index');
+		fs.mkdirSync(indexDir, {recursive: true});
+
+		// Scoped runs check just the one file being run; a whole-suite run
+		// has to be conservative and check every known file, since one shared
+		// config can't give different tests different storageState. See
+		// anyKnownFileRequiresFreshSession's own reasoning for why "skip it
+		// for the whole run" is the safe direction when in doubt.
+		const needsFreshSession = filePath
+			? fileRequiresFreshSession(context.projectRoot, testDirAbsolute, filePath)
+			: anyKnownFileRequiresFreshSession(context.projectRoot);
+
+		let storageStatePath: string | null = null;
+		if (!needsFreshSession) {
+			const authSetupResult = await runAuthSetupIfNeeded(
+				binPath,
+				context.projectRoot,
+				context.orbitConfig.baseUrl,
+				indexDir,
+				context.signal,
+			);
+			if (!authSetupResult.ok) {
+				return {ok: false, error: authSetupResult.error};
+			}
+			storageStatePath = authSetupResult.storageStatePath;
+		}
 
 		// A fresh, uniquely-named subfolder per run — Playwright cleans
 		// outputDir at the start of every run, so a fixed shared path would
@@ -362,7 +560,6 @@ export const runTestTool: ToolDefinition<RunTestArgs, RunTestResult> = {
 		// any session log or repair-loop step still referencing them).
 		const runId = new Date().toISOString().replace(/[:.]/g, '-');
 		const outputDirAbsolute = path.join(orbitDir, 'traces', runId);
-		fs.mkdirSync(indexDir, {recursive: true});
 		fs.mkdirSync(outputDirAbsolute, {recursive: true});
 
 		const configPath = path.join(indexDir, 'playwright.config.mjs');
@@ -372,6 +569,7 @@ export const runTestTool: ToolDefinition<RunTestArgs, RunTestResult> = {
 				testDirAbsolute,
 				context.orbitConfig.baseUrl,
 				outputDirAbsolute,
+				storageStatePath,
 			),
 			'utf8',
 		);

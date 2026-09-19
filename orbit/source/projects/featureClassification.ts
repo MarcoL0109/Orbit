@@ -6,6 +6,13 @@ export type FeatureClassificationEntry = {
 	checksum: string;
 	features: string[];
 	classifiedAt: string;
+	// True only for a test whose own subject IS login/session/authentication
+	// itself — everything else should run pre-authenticated via the shared
+	// storageState (see writeAuthSetup.ts, runTest.ts). Optional/undefined
+	// for every entry written before this existed and for source-file
+	// classifications (which were never about session state at all); both
+	// are treated as false. See run_test's own handling of this flag.
+	requiresFreshSession?: boolean;
 };
 
 export type FeatureClassificationFile = {
@@ -65,12 +72,14 @@ export function recordClassification(
 	relativeFile: string,
 	checksum: string,
 	features: string[],
+	requiresFreshSession = false,
 ): void {
 	const data = readFeatureClassifications(projectRoot);
 	data.entries[relativeFile] = {
 		checksum,
 		features,
 		classifiedAt: new Date().toISOString(),
+		requiresFreshSession,
 	};
 	writeFeatureClassifications(projectRoot, data);
 }

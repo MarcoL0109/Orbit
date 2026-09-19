@@ -81,6 +81,12 @@ export type OrbitConfig = {
 	environmentSetupModel: string;
 	classificationModel: string;
 	promptRecommendationModel: string;
+	// Path to a business requirements doc on disk, or null when none is
+	// configured — the source `/test` (no prompt) scopes autonomous testing
+	// from. Re-read and re-extracted into .orbit/index/brd-features.json on
+	// every /test run, gated by a content checksum so an unchanged doc costs
+	// nothing beyond one file read. See brdFeatures.ts.
+	brdPath: string | null;
 };
 
 export function getOrbitConfigPath(projectRoot: string): string {
