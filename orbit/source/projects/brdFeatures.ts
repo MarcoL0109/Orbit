@@ -135,32 +135,48 @@ export function sortByPriority(features: BrdFeature[]): BrdFeature[] {
 	);
 }
 
-// A feature counts as "covered" the same way coverage.ts already treats
+// A feature is "covered" the same way coverage.ts already treats
 // code-derived features: some test file declares it via write_test_file's
 // own features argument, recorded into the same feature-classification.json
 // every read_file classification also lives in (see recordClassification's
 // callers). This works identically in blind mode, unlike coverage.ts's own
 // route/component-based total, since it only ever looks at what tests
 // declared — never at a structural project map that blind mode never has.
-export function filterUncoveredFeatures(
+//
+// Deliberately informational only — this used to filter already-covered
+// features out of the BRD batch entirely, but Orbit has no way to know
+// whether the underlying app changed since that test was last written (no
+// git access, and in blind mode no source access at all), so a name match
+// here is not evidence the feature still behaves the same way. Silently
+// skipping on it would just be guessing that nothing changed. The caller
+// re-tests every feature every run and uses this only to tell the user
+// which ones are re-tests of an existing file versus genuinely new — never
+// to decide what to run. Also deliberately does not check whether the
+// covering file still exists or its checksum still matches: a feature that
+// was covered by a file someone (or a reset) later deleted should still
+// show as "previously covered by X", not silently look brand new.
+export function getFeatureCoverage(
 	projectRoot: string,
 	testDir: string,
-	features: BrdFeature[],
-): BrdFeature[] {
+): Map<string, string[]> {
 	const classifications = readFeatureClassifications(projectRoot);
 	const normalizedTestDir = testDir.endsWith(path.sep)
 		? testDir
 		: testDir + path.sep;
 
-	const coveredFeatures = new Set<string>();
+	const coverage = new Map<string, string[]>();
 	for (const [relativeFile, entry] of Object.entries(
 		classifications.entries,
 	)) {
 		const isTestFile =
 			relativeFile === testDir || relativeFile.startsWith(normalizedTestDir);
 		if (!isTestFile) continue;
-		for (const feature of entry.features) coveredFeatures.add(feature);
+		for (const feature of entry.features) {
+			const files = coverage.get(feature) ?? [];
+			files.push(relativeFile);
+			coverage.set(feature, files);
+		}
 	}
 
-	return features.filter(f => !coveredFeatures.has(f.feature));
+	return coverage;
 }

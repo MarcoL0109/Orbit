@@ -22,7 +22,7 @@ import {
 import {
 	refreshBrdFeaturesIfNeeded,
 	sortByPriority,
-	filterUncoveredFeatures,
+	getFeatureCoverage,
 } from '../projects/brdFeatures.js';
 import type {BrdFeature} from '../ai/extractBrdFeatures.js';
 import type {CommandContext} from './context.js';
@@ -471,9 +471,15 @@ const PRIORITY_SECTION_ORDER: BrdFeature['priority'][] = [
 // Numbered to match run order exactly (so "run 4 failed" is unambiguous
 // later), grouped under a priority heading so the shape of the batch is
 // visible at a glance — feature name and description on separate lines so
-// a long description never runs into the name. `features` must already be
-// sortByPriority'd; this only groups, it doesn't re-sort.
-function formatUncoveredFeaturesList(features: BrdFeature[]): string {
+// a long description never runs into the name, and a coverage note on its
+// own line when a past run already covered it (see getFeatureCoverage: this
+// is informational only, never a reason to skip — the app may have changed
+// since). `features` must already be sortByPriority'd; this only groups, it
+// doesn't re-sort.
+function formatFeatureList(
+	features: BrdFeature[],
+	coverage: Map<string, string[]>,
+): string {
 	let index = 0;
 	const sections = PRIORITY_SECTION_ORDER.map(priority => {
 		const inSection = features.filter(f => f.priority === priority);
@@ -481,7 +487,11 @@ function formatUncoveredFeaturesList(features: BrdFeature[]): string {
 
 		const lines = inSection.map(feature => {
 			index += 1;
-			return `  ${index}. ${feature.feature}\n     ${feature.description}`;
+			const coveredBy = coverage.get(feature.feature);
+			const coverageNote = coveredBy
+				? `\n     (previously covered by ${coveredBy.join(', ')} — re-testing in case the feature changed)`
+				: '';
+			return `  ${index}. ${feature.feature}\n     ${feature.description}${coverageNote}`;
 		});
 
 		return `${priority.toUpperCase()}\n${lines.join('\n')}`;
@@ -490,15 +500,19 @@ function formatUncoveredFeaturesList(features: BrdFeature[]): string {
 	return sections.join('\n\n');
 }
 
-// /test with no prompt: autonomously test every BRD feature not yet
-// covered, in priority order, instead of the user describing one feature
-// at a time. Each feature just becomes runTestCommand's own prompt — this
-// doesn't duplicate that logic, it drives it in a loop. See the design
-// conversation this followed: the list is always shown and approved as one
-// batch before anything runs, since each feature test has the same real,
-// permanent side effects (a real record created, a real test file written)
-// as any other /test run, just multiplied across however many are
-// uncovered.
+// /test with no prompt: autonomously test every BRD feature, in priority
+// order, instead of the user describing one feature at a time. Each feature
+// just becomes runTestCommand's own prompt — this doesn't duplicate that
+// logic, it drives it in a loop. Every feature runs every time, even ones a
+// past run already covered — Orbit has no way to know whether the
+// underlying app changed since (no git access, and in blind mode no source
+// access at all), so treating past coverage as a reason to skip would just
+// be guessing that nothing changed. Past coverage is still shown, via
+// formatFeatureList, so this isn't opaque about which are re-tests. See the
+// design conversation this followed: the list is always shown and approved
+// as one batch before anything runs, since each feature test has the same
+// real, permanent side effects (a real record created, a real test file
+// written) as any other /test run, just multiplied across the whole BRD.
 export async function runTestEverythingFromBrd(
 	context: CommandContext,
 	signal: AbortSignal,
@@ -549,47 +563,33 @@ export async function runTestEverythingFromBrd(
 	}
 
 	const brdFeatures = refreshResult.data;
-	const uncovered = sortByPriority(
-		filterUncoveredFeatures(
-			context.project.root,
-			orbitConfig.testDir,
-			brdFeatures.features,
-		),
-	);
-
-	if (uncovered.length === 0) {
-		context.setMessages(previous => [
-			...previous,
-			{
-				role: 'agent',
-				content: `Every feature in the BRD (${brdFeatures.features.length} total) already has a covering test — nothing to run.`,
-				color: 'green',
-			},
-		]);
-		return {ran: true, featureCount: 0};
-	}
+	const features = sortByPriority(brdFeatures.features);
+	const coverage = getFeatureCoverage(context.project.root, orbitConfig.testDir);
+	const recoveredCount = features.filter(f => coverage.has(f.feature)).length;
 
 	context.setMessages(previous => [
 		...previous,
 		{
 			role: 'agent',
-			content: `${uncovered.length} uncovered feature(s) from the BRD, in the order they'll run:\n\n${formatUncoveredFeaturesList(
-				uncovered,
-			)}`,
+			content: `${features.length} feature(s) from the BRD, in the order they'll run${
+				recoveredCount > 0
+					? ` (${recoveredCount} previously covered, re-testing anyway)`
+					: ''
+			}:\n\n${formatFeatureList(features, coverage)}`,
 		},
 	]);
 
 	const approved = await context.requestApproval(
-		`Run ${uncovered.length} test(s) for the features above? Each writes a real test file and runs it against the live app.`,
+		`Run ${features.length} test(s) for the features above? Each writes a real test file and runs it against the live app.`,
 	);
 	if (!approved) {
 		return {ran: false, reason: 'User declined to run the batch'};
 	}
 
-	for (const feature of uncovered) {
+	for (const feature of features) {
 		if (signal.aborted) break;
 		await runTestCommand(feature.description, context, signal);
 	}
 
-	return {ran: true, featureCount: uncovered.length};
+	return {ran: true, featureCount: features.length};
 }

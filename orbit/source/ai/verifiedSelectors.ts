@@ -1,4 +1,5 @@
 import type {AgentStep} from './agentLoop.js';
+import type {ApiCall, BrowserWorkerResponse} from './browserWorker.js';
 
 export type VerifiedBrowserAction =
 	| {
@@ -145,6 +146,146 @@ export function summarizeVerifiedSelectors(steps: AgentStep[]): string {
 		.join('\n');
 }
 
+// Every successful, state-changing (non-GET, with a body) API call this
+// run's own live exploration actually captured — the same raw material the
+// seeding technique in agent.ts's system prompt reuses. This exists for the
+// same reason summarizeVerifiedSelectors above does: a technique described
+// only in prose, competing every turn against a MECHANICALLY-enforced
+// default (write_test_file's blind-mode gate only ever guarantees a pass
+// for selectors that trace back to something literally clicked/filled live
+// — replaying the UI flow verbatim is the one path the model can be
+// certain survives that gate), consistently lost to that default even
+// after the prose was made more directive — confirmed directly, twice, on
+// the same feature. An equally concrete, itemized artifact to copy a seed
+// call from, surfaced every turn right alongside the selector list, is the
+// structural fix; a paragraph competing against a list is not a fair fight
+// no matter how forcefully the paragraph is worded.
+//
+// "Non-GET with a body" alone is nowhere near precise enough a filter,
+// confirmed directly: a real capture batch against a real app (Odoo) had
+// TEN qualifying POST calls for every one genuine creation request — view
+// definitions, search reads, onchange previews, systray/messaging
+// bootstrap calls — because that app (like many real JSON-RPC/GraphQL
+// backends) tunnels every RPC call, reads included, through POST to the
+// same endpoint shape. Buried 9th out of 10 in that list, the real
+// creation request was there, but the model reported none had been
+// captured — not dishonest, just an unusable, noise-drowned list. Every
+// captured batch is already scoped to ONE browser_action (apiCalls is
+// drained per-action, not accumulated), so correlating with what TRIGGERED
+// that action is a much stronger, still app-agnostic signal than the HTTP
+// method: a real save/create/confirm is overwhelmingly a click on a
+// button whose accessible name says so, not a page load, a fill, or a
+// mid-form selection.
+const COMMIT_LIKE_SELECTOR_PATTERN = /save|submit|create|confirm/i;
+
+function wasTriggeredByCommitClick(
+	steps: AgentStep[],
+	resultIndex: number,
+): boolean {
+	const triggeringCall = steps[resultIndex - 1];
+	if (
+		triggeringCall?.type !== 'tool_call' ||
+		triggeringCall.name !== 'browser_action'
+	) {
+		return false;
+	}
+
+	const args = triggeringCall.args as {
+		action?: string;
+		selector?: string | null;
+	};
+	return (
+		args.action === 'click' &&
+		!!args.selector &&
+		COMMIT_LIKE_SELECTOR_PATTERN.test(args.selector)
+	);
+}
+
+// Keyed by "METHOD url" so a repeated call against the same endpoint (e.g.
+// a retry during repair) keeps only its most recent capture, not every
+// attempt.
+export function collectSeedableRequestsThisRun(steps: AgentStep[]): ApiCall[] {
+	const seedable = new Map<string, ApiCall>();
+
+	for (const [index, step] of steps.entries()) {
+		if (
+			step.type !== 'tool_result' ||
+			step.name !== 'browser_action' ||
+			!step.result.ok ||
+			!wasTriggeredByCommitClick(steps, index)
+		) {
+			continue;
+		}
+
+		const data = step.result.data as BrowserWorkerResponse & {ok: true};
+		for (const call of data.apiCalls ?? []) {
+			if (
+				!call.ok ||
+				call.method === 'GET' ||
+				!call.requestBody ||
+				call.requestBodyTruncated
+			) {
+				continue;
+			}
+			seedable.set(`${call.method} ${call.url}`, call);
+		}
+	}
+
+	return [...seedable.values()];
+}
+
+// Distinguishes "nothing to seed from" from "something was captured but
+// excluded" — without this, a truncated capture (see
+// MAX_CAPTURED_REQUEST_BODY_CHARS in browserWorker.ts) looks IDENTICAL to
+// genuine unavailability in the prompt, which is exactly the ambiguity that
+// made a real instance of this bug look, from the outside, like the model
+// simply wasn't trying.
+function hasTruncatedSeedCandidate(steps: AgentStep[]): boolean {
+	for (const [index, step] of steps.entries()) {
+		if (
+			step.type !== 'tool_result' ||
+			step.name !== 'browser_action' ||
+			!step.result.ok ||
+			!wasTriggeredByCommitClick(steps, index)
+		) {
+			continue;
+		}
+
+		const data = step.result.data as BrowserWorkerResponse & {ok: true};
+		for (const call of data.apiCalls ?? []) {
+			if (
+				call.ok &&
+				call.method !== 'GET' &&
+				call.requestBody &&
+				call.requestBodyTruncated
+			) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+export function summarizeSeedableRequests(steps: AgentStep[]): string {
+	const seedable = collectSeedableRequestsThisRun(steps);
+
+	if (seedable.length === 0) {
+		return hasTruncatedSeedCandidate(steps)
+			? 'None usable — a real creation request was captured this run, but its body was too long and got truncated (see requestBodyTruncated), so it is NOT safe to replay verbatim. Do not seed from it; use the full UI flow for this precondition instead.'
+			: 'None captured yet this run.';
+	}
+
+	return seedable
+		.map(call => {
+			const contentType = call.requestContentType
+				? ` (content-type: ${call.requestContentType})`
+				: '';
+			return `- ${call.method} ${call.url}${contentType}\n  body: ${call.requestBody}`;
+		})
+		.join('\n');
+}
+
 // Extracts the quoted "name" string from each verified selector, where
 // present — Playwright's own selector-engine syntax (e.g.
 // `role=combobox[name="Type to find a customer..."]`), the format
@@ -171,7 +312,18 @@ function extractVerifiedNames(actions: VerifiedBrowserAction[]): string[] {
 // getByLabel/getByPlaceholder/getByText's direct string argument.
 function extractReferencedNames(fileContent: string): string[] {
 	const names: string[] = [];
-	const namePropertyPattern = /name:\s*['"]([^'"]+)['"]/g;
+	// Anchored to an actual getByRole(...) call, not a bare `name:` anywhere
+	// in the file — a written test can now also contain a raw JSON payload
+	// (a seeded API request's body, see agent.ts's seeding guidance), and an
+	// unanchored pattern matches ANY object key ending in "name:", including
+	// as the tail of an unrelated key like `x_studio_project_name`. Confirmed
+	// directly: a seed call's own payload field tripped this exact false
+	// positive, which would have blindly rejected a correct, already-live-
+	// verified seed request as an unverified selector. [^)]*? assumes
+	// getByRole's own two-arg call isn't itself broken across a `)` — true
+	// for every real getByRole usage, which never nests another call's
+	// closing paren between the role string and its options object.
+	const namePropertyPattern = /getByRole\([^)]*?name:\s*['"]([^'"]+)['"]/g;
 	const directArgPattern =
 		/getBy(?:Label|Placeholder|Text)\(\s*['"]([^'"]+)['"]/g;
 

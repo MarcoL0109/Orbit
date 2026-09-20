@@ -13,6 +13,19 @@ export type FeatureClassificationEntry = {
 	// classifications (which were never about session state at all); both
 	// are treated as false. See run_test's own handling of this flag.
 	requiresFreshSession?: boolean;
+	// The agent's own required, checked-non-blank explanation of whether it
+	// seeded a precondition via a direct API call instead of the UI, and why
+	// (or why not) — see write_test_file's own schema and agent.ts's
+	// "Seeding a precondition" guidance. Exists to answer "why isn't it
+	// seeding" directly from what the model itself says, run over run,
+	// instead of guessing from the written file's shape alone. Optional for
+	// every entry written before this existed and for source-file
+	// classifications.
+	seedingDecision?: {
+		preconditionNeeded: boolean;
+		usedSeeding: boolean;
+		reasoning: string;
+	};
 };
 
 export type FeatureClassificationFile = {
@@ -73,6 +86,11 @@ export function recordClassification(
 	checksum: string,
 	features: string[],
 	requiresFreshSession = false,
+	seedingDecision?: {
+		preconditionNeeded: boolean;
+		usedSeeding: boolean;
+		reasoning: string;
+	},
 ): void {
 	const data = readFeatureClassifications(projectRoot);
 	data.entries[relativeFile] = {
@@ -80,6 +98,7 @@ export function recordClassification(
 		features,
 		classifiedAt: new Date().toISOString(),
 		requiresFreshSession,
+		seedingDecision,
 	};
 	writeFeatureClassifications(projectRoot, data);
 }

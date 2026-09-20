@@ -65,6 +65,23 @@ export type ApiCall = {
 	// settled). Undefined for a GET/request with no body, same as `body`
 	// above is undefined when the response has none.
 	requestBody?: string;
+	// Only the content-type, not the full header set — session/auth is
+	// already carried by cookies (shared automatically once a written test
+	// replays this same request via page.request), and the rest of a real
+	// request's headers (user-agent, sec-fetch-*, referer) are noise for
+	// every OTHER purpose apiCalls already serves. This exists specifically
+	// so a seeded request in a written test can be sent with the same
+	// content-type the real one used, instead of guessing it.
+	requestContentType?: string;
+	// True only when the real request body was longer than
+	// MAX_CAPTURED_REQUEST_BODY_CHARS and got cut — a truncated body is
+	// exactly as unsafe to seed from as a missing one (replaying a cut-off
+	// JSON.stringify output is malformed JSON, not a smaller valid record),
+	// so this needs to be an explicit, checkable fact rather than something
+	// inferred from the string happening to look cut off. See
+	// collectSeedableRequestsThisRun, which excludes anything this is true
+	// for.
+	requestBodyTruncated?: boolean;
 	body?: string;
 };
 
@@ -174,6 +191,18 @@ let pendingConsoleErrors = [];
 let pendingWebSocketMessages = [];
 
 const MAX_CAPTURED_TEXT_CHARS = 2000;
+// requestBody specifically needs a much looser cap than everything else
+// captured here — a response body or WebSocket frame only ever needs to be
+// legible enough for the agent to eyeball success/rendering, but a seeded
+// precondition (see agent.ts's "Seeding a precondition") replays requestBody
+// byte-for-byte, so a truncated one is unsafe to seed with at all, not just
+// harder to read. Confirmed directly: a real Odoo web_save payload (a
+// handful of order lines' worth of fields) exceeded the shared 2000-char cap,
+// and the agent correctly refused to seed from a body it could not confirm
+// was complete, falling back to the full UI flow instead — a real
+// architectural constraint on a real feature, not a preference to word
+// around.
+const MAX_CAPTURED_REQUEST_BODY_CHARS = 8000;
 const MAX_CAPTURED_PER_ACTION = 10;
 
 // WebSocket frame payloads can be binary (Buffer) — not meaningful to
@@ -229,6 +258,8 @@ async function ensurePage() {
         // best-effort handling below.
         method: request.method(),
         requestBody: request.postData() ?? undefined,
+        // headers() is synchronous and never throws, same as postData().
+        requestContentType: request.headers()['content-type'],
         status,
         statusText: response.statusText(),
         ok: status < 400,
@@ -282,14 +313,18 @@ async function drainCapturedEvents() {
 
   const resolvedApiCalls = await Promise.all(
     apiCalls.map(
-      async ({url, method, requestBody, status, statusText, ok, bodyPromise}) => {
+      async ({url, method, requestBody, requestContentType, status, statusText, ok, bodyPromise}) => {
         const body = await bodyPromise;
         return {
           url,
           method,
           requestBody: requestBody
-            ? requestBody.slice(0, MAX_CAPTURED_TEXT_CHARS)
+            ? requestBody.slice(0, MAX_CAPTURED_REQUEST_BODY_CHARS)
             : undefined,
+          requestBodyTruncated: requestBody
+            ? requestBody.length > MAX_CAPTURED_REQUEST_BODY_CHARS
+            : false,
+          requestContentType,
           status,
           statusText,
           ok,

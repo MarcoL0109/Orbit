@@ -12,10 +12,20 @@ type WriteTestFileArgs = {
 	content: string;
 	features: string[];
 	requiresFreshSession: boolean;
+	seedingDecision: {
+		preconditionNeeded: boolean;
+		usedSeeding: boolean;
+		reasoning: string;
+	};
 };
 
 type WriteTestFileData = {
 	path: string;
+	seedingDecision: {
+		preconditionNeeded: boolean;
+		usedSeeding: boolean;
+		reasoning: string;
+	};
 };
 
 export const writeTestFileTool: ToolDefinition<
@@ -31,7 +41,7 @@ export const writeTestFileTool: ToolDefinition<
 			relativePath: {
 				type: 'string',
 				description:
-					'Path relative to the configured test directory, e.g. "login.spec.ts"',
+					'A bare filename, written directly into the configured test directory — e.g. "login.spec.ts". No subdirectories (no "sales/confirm.spec.ts") — every generated test lives flat at the same level, so its location is always predictable without having to search for it.',
 			},
 			content: {
 				type: 'string',
@@ -46,15 +56,80 @@ export const writeTestFileTool: ToolDefinition<
 			requiresFreshSession: {
 				type: 'boolean',
 				description:
-					'true only if this test\'s own subject is login/authentication/session behavior itself (e.g. verifying login succeeds or fails, session expiry, logout) — almost always false. When true, run_test skips the shared pre-authenticated storageState for this file and lets it start from a genuinely fresh, logged-out browser, so it actually exercises what it claims to test rather than starting already signed in. Every other feature (creating, editing, searching, anything that merely NEEDS to be logged in to run) should be false and rely on the shared authenticated session instead of writing its own login steps.',
+					"true only if this test's own subject is login/authentication/session behavior itself (e.g. verifying login succeeds or fails, session expiry, logout) — almost always false. When true, run_test skips the shared pre-authenticated storageState for this file and lets it start from a genuinely fresh, logged-out browser, so it actually exercises what it claims to test rather than starting already signed in. Every other feature (creating, editing, searching, anything that merely NEEDS to be logged in to run) should be false and rely on the shared authenticated session instead of writing its own login steps.",
+			},
+			seedingDecision: {
+				type: 'object',
+				description:
+					'Required for every write, not just when you do seed something. First decide preconditionNeeded: does this test need an existing/created record it does NOT itself test the creation of (e.g. "confirm" needs a quotation to already exist)? If preconditionNeeded is false (this test has nothing to seed — e.g. it IS the creation feature itself, or every step is its own subject), leave reasoning empty; there is nothing to explain. If preconditionNeeded is true, decide explicitly whether that precondition was seeded via a direct API call replaying a captured request (see "Seeding a precondition" in your instructions) instead of driven through the UI, and reasoning becomes required and must be specific: if a matching captured request was available this run and you used the UI flow anyway, say why (e.g. the captured body wasn\'t cleanly replayable JSON); if no matching capture was available, say that. A vague or generic answer is exactly as useless as no answer, since this is the only record of why a given run did or didn\'t seed.',
+				properties: {
+					preconditionNeeded: {
+						type: 'boolean',
+						description:
+							"true if this test needs an existing/created record it does not itself test the creation of. false if this test's own subject already covers every record it touches (e.g. the creation feature itself), so there is nothing to seed.",
+					},
+					usedSeeding: {
+						type: 'boolean',
+						description:
+							'Only meaningful when preconditionNeeded is true — false otherwise. true only if this file actually contains a page.request.post (or equivalent) replaying a captured request for that precondition.',
+					},
+					reasoning: {
+						type: 'string',
+						description:
+							'Required and must be non-blank when preconditionNeeded is true — a specific, honest explanation for the usedSeeding value above, not a restatement of it. Leave empty when preconditionNeeded is false; there is nothing to explain.',
+					},
+				},
+				required: ['preconditionNeeded', 'usedSeeding', 'reasoning'],
+				additionalProperties: false,
 			},
 		},
-		required: ['relativePath', 'content', 'features', 'requiresFreshSession'],
+		required: [
+			'relativePath',
+			'content',
+			'features',
+			'requiresFreshSession',
+			'seedingDecision',
+		],
 	},
 	async execute(
-		{relativePath, content, features, requiresFreshSession},
+		{relativePath, content, features, requiresFreshSession, seedingDecision},
 		context,
 	) {
+		// Same enforcement report_result already applies to rootCause — a
+		// blank or missing reasoning is exactly as useless as no field at
+		// all, and without a check nothing stops the model from technically
+		// satisfying the schema with an empty string. Only enforced when a
+		// precondition actually exists to reason about — a test with none
+		// (e.g. the creation feature itself) has nothing to explain, and
+		// forcing boilerplate there would just be noise on every single
+		// write, not a real record of anything.
+		if (
+			seedingDecision?.preconditionNeeded &&
+			!seedingDecision.reasoning?.trim()
+		) {
+			return {
+				ok: false,
+				error:
+					'seedingDecision.reasoning is required and cannot be blank when preconditionNeeded is true — explain, specifically, whether a captured request was available for it this run and why you did or did not seed it. Call write_test_file again with that filled in.',
+			};
+		}
+
+		// Enforced, not just described in the schema — nothing else stops
+		// the model from nesting one file under a subdirectory while every
+		// other one it wrote stays flat, and it has: confirmed directly,
+		// the same "confirm" feature got written into a "sales/" folder
+		// twice across separate runs while its sibling test files (create,
+		// search) stayed at the top level. No ambiguity here (unlike the
+		// seeding case) — a path separator either is or isn't present.
+		if (relativePath.includes('/') || relativePath.includes(path.sep)) {
+			return {
+				ok: false,
+				error: `relativePath must be a bare filename with no subdirectory — got "${relativePath}". Every generated test lives flat in the configured test directory; write it as just the filename (e.g. "${path.basename(
+					relativePath,
+				)}") instead.`,
+			};
+		}
+
 		const testDirResolution = resolveConfiguredDir(
 			context.projectRoot,
 			context.orbitConfig.testDir,
@@ -146,8 +221,9 @@ export const writeTestFileTool: ToolDefinition<
 			checksumFromContent(content),
 			features,
 			requiresFreshSession,
+			seedingDecision,
 		);
 
-		return {ok: true, data: {path: resolved}};
+		return {ok: true, data: {path: resolved, seedingDecision}};
 	},
 };

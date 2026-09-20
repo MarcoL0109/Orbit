@@ -19,6 +19,7 @@ AI QA agent for project scanning, test planning, and E2E automation
 * Asks for your help on anything it has no way to do itself (a 2FA code, an email verification link)
 * Keeps a per-project knowledge graph (optional, via [graphify](https://github.com/Graphify-Labs/graphify)) so it can understand how code connects without opening every file
 * Tracks feature coverage — which routes and components have a matching test and which don't
+* Reads a business requirements document (`.docx`, Markdown, or plain text) and figures out what to test itself — no need to describe every feature by hand
 * Answers plain questions about the project directly — no `/command` needed — reading real code and, with your approval, running a real `/test` when you actually want one
 * Runs headlessly from a CI pipeline (`--ci`) — same agent, no interactive prompts, exits with a pass/fail status code
 * Tests an already-running app it has no source access to at all (**blind mode**) — pure live-browser exploration, in a workspace of its own, for cases where reading the codebase isn't an option
@@ -74,6 +75,7 @@ Shows which routes and components still have no test at all.
 |---|---|
 | `/init [path]` | Create `.orbit/` context and run an initial scan — confirms the detected path first, or trusts an explicit one directly |
 | `/test <description>` | Generate and run a Playwright test for the feature you describe |
+| `/test` (no arguments) | Only once a BRD is configured — test every feature in it, in priority order. See [Testing from a BRD](#testing-from-a-brd) |
 | `/scan` | Refresh the project index (routes, components, tests, config) |
 | `/coverage` | List routes/components with no matching test |
 | `/config` | Allow user to switch their Orbit settings via terminal (also supports direct file modifications) |
@@ -101,6 +103,48 @@ Shows which routes and components still have no test at all.
 * **`report_result`** — report one pass/fail result per feature, with a summary. A failed or given-up result also needs a `rootCause`: the specific, evidence-backed reason it failed — not a restatement of the summary — which gets written to `.orbit/memory/failures.md` so the *next* run against this project starts already knowing about it, instead of rediscovering the same failure cold. Each result also breaks down where the pipeline actually stood, not just whether it passed overall: whether live browser exploration itself worked, whether the real backend response for whatever the feature creates/saves/submits was actually checked and confirmed (not just inferred from the UI looking fine), and whether the written Playwright test passed — that last one alone is never self-reported, it's read directly from the real test run's own result
 
 Before writing a fix, the agent reads real markup and watches the real page, not just the source — and it's told explicitly to tell a genuine application bug apart from its own mistake using the browser's network/console evidence, rather than inferring one from silence. A repair budget (`maxRepairAttempts`, default 3) caps how many times it'll patch a failing test before giving up and reporting the feature as failed.
+
+## Testing from a BRD
+
+Instead of describing each feature by hand, point Orbit at a business requirements document and let it figure out what to test. Set the path via `/config` (field: "Business requirements doc path") — `.docx`, Markdown, or plain text all work; `.docx` is read directly (no need to export it to text first).
+
+Once `brdPath` is set, `/test` with no arguments extracts a structured feature list from it and runs every one of them, instead of asking you to name a feature:
+
+```txt
+/test
+```
+
+```txt
+3 feature(s) from the BRD, in the order they'll run:
+
+MUST
+  1. sales_quotations.create
+     A user can create a sales quotation for an existing customer with at least one product line.
+
+SHOULD
+  2. sales_quotations.confirm.to_sales_order
+     A user can confirm a quotation, converting it into a sales order.
+
+COULD
+  3. sales_quotations.search.by_customer_name
+     A user can search the Quotations list by customer name and see all matching quotations returned.
+
+Run 3 test(s) for the features above? Each writes a real test file and runs it against the live app.
+```
+
+The full list is always shown and approved as one batch before anything runs — each feature test has the same real, permanent side effects (a real record created, a real test file written) as any other `/test` run, just multiplied across the whole document. Once approved, each feature becomes an ordinary `/test <description>` run under the hood, one at a time, in priority order (`must` → `should` → `could` → features with no stated priority, which sort last — that's "lowest confidence," not "unimportant").
+
+Extraction itself is checksum-gated: the BRD is only re-read by the model when its content has actually changed since the last `/test`, so re-running `/test` on an unchanged document doesn't burn a call re-extracting the same list.
+
+**Every feature runs every time, even ones a past run already covered.** Orbit has no reliable way to know whether the underlying app changed since a feature was last tested — no git access, and in blind mode no source access at all — so treating past coverage as a reason to skip would just be guessing that nothing changed. A feature a past run already covered is still shown, annotated with which file covered it:
+
+```txt
+  2. sales_quotations.confirm.to_sales_order
+     A user can confirm a quotation, converting it into a sales order.
+     (previously covered by Orbit-test/e2e/quotation-confirmation.spec.ts — re-testing in case the feature changed)
+```
+
+This works identically in blind and normal mode, since coverage here is based purely on what past `write_test_file` calls declared (in `.orbit/index/feature-classification.json`), not a structural project map blind mode never has.
 
 ## Asking Orbit questions
 
@@ -220,6 +264,8 @@ There's no way to turn blind mode "off" on a project in place — a workspace wi
     project-map.json     # routes, components, tests, config files — from the last /scan
     checksums.json        # used to skip re-scanning unchanged files
     browser-worker.mjs    # generated Playwright worker script (regenerated each run)
+    feature-classification.json  # which file(s) cover which feature, from past write_test_file calls
+    brd-features.json      # extracted BRD feature list, checksum-gated against brdPath's content
   memory/
     overview.md            # project notes, edit freely
     decisions.md            # testing conventions Orbit should follow
@@ -252,11 +298,12 @@ This layout, folder name included, is specific to a normal project. A [blind-mod
   "dockerComposeFile": null,
   "dockerComposeHasHealthchecks": false,
   "scanMode": null,
-  "environmentSetupRoot": null
+  "environmentSetupRoot": null,
+  "brdPath": null
 }
 ```
 
-`baseUrl` and `dockerComposeFile` are auto-detected at `/init`. `scanMode` starts `null` (not yet chosen) and gets set the first time you pick regex or graphify. `manualTestDir` holds human-readable `.md` records for features that needed `request_user_input` — never a runnable test, since there's nothing safe to automate for those.
+`baseUrl` and `dockerComposeFile` are auto-detected at `/init`. `scanMode` starts `null` (not yet chosen) and gets set the first time you pick regex or graphify. `manualTestDir` holds human-readable `.md` records for features that needed `request_user_input` — never a runnable test, since there's nothing safe to automate for those. `brdPath` points at a business requirements document (`.docx`, Markdown, or plain text) — set it via `/config` to unlock `/test` with no arguments; see [Testing from a BRD](#testing-from-a-brd).
 
 `environmentSetupRoot` matters only when your project's root is itself a subdirectory of a larger repo — a JS frontend with a sibling backend, `docker-compose.yml`, and README one level up, for instance. `read_file` and `run_command` are both sandboxed to the project root everywhere else in Orbit, which is exactly right for writing/running tests (that's where `node_modules/.bin/playwright` and `testDir` actually live) — but it means the environment-setup agent, run from that same root, has no way to even discover a sibling backend exists, let alone start it. Set `environmentSetupRoot` to the repo root (via `/config`) to widen *only* the setup agent's own view; everything else (scanning, `write_test_file`, `run_test`) keeps using the project root unchanged. Leave it `null` when your project root already is the repo root, which is the common case.
 

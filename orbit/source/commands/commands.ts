@@ -323,19 +323,20 @@ export const commands: OrbitCommand[] = [
 					role: 'system',
 					content: `
 Available Orbit commands:
-/help       Show available commands
-/switch     Switch Orbit to work on a different project — also offers "Set Up Blind Project" when nothing is active yet
-/init [path] Initialize Orbit — confirms the detected path first, or trusts an explicit one. Path is optional. If left empty, orbit will suggest one for you
-/deinit     Delete the .orbit folder within the current project
-/scan       Build index and context for the current project
-/config     View and change project configuration — includes turning Blind mode on, which sets up (or switches to) a URL-only project with no local codebase involved
-/test       Generate and run a Playwright test for a feature you describe
-/coverage   Show routes and components that don't have a matching test
-/projects   Show remembered projects
-/memory     Show project memory (--overview / --decisions / --failures to filter, default all)
-/clear      Clear the screen
-/abort      Abort ongoing tasks that is currently running
-/exit       Exit Orbit`,
+/help           Show available commands
+/switch         Switch Orbit to work on a different project — also offers "Set Up Blind Project" when nothing is active yet
+/init [path]    Initialize Orbit — confirms the detected path first, or trusts an explicit one. Path is optional. If left empty, orbit will suggest one for you
+/deinit         Delete the .orbit folder within the current project
+/scan           Build index and context for the current project
+/config         View and change project configuration — includes turning Blind mode on, which sets up (or switches to) a URL-only project with no local codebase involved
+/test <prompt>  Generate and run a Playwright test for a feature you describe
+/test           Generate test according to feature described in BRD document specified in the BRD path
+/coverage       Show routes and components that don't have a matching test
+/projects       Show remembered projects
+/memory         Show project memory (--overview / --decisions / --failures to filter, default all)
+/clear          Clear the screen
+/abort          Abort ongoing tasks that is currently running
+/exit           Exit Orbit`,
 				},
 			]);
 		},

@@ -142,6 +142,11 @@ test('write_test_file rejects a relativePath that escapes the configured test di
 			content: 'test content',
 			features: ['example'],
 			requiresFreshSession: false,
+			seedingDecision: {
+				preconditionNeeded: false,
+				usedSeeding: false,
+				reasoning: '',
+			},
 		},
 		fakeContext(projectRoot, orbitConfig),
 	);
@@ -164,6 +169,11 @@ test('write_test_file accepts a relativePath that stays inside the test director
 			content: 'test content',
 			features: ['example'],
 			requiresFreshSession: false,
+			seedingDecision: {
+				preconditionNeeded: false,
+				usedSeeding: false,
+				reasoning: '',
+			},
 		},
 		fakeContext(projectRoot, orbitConfig),
 	);
