@@ -106,7 +106,7 @@ export function describeAgentStepOutcome(
 			// nothing to report here, and showing an empty/boilerplate line
 			// for it every time would just be noise on every single write.
 			const seedingNote = seedingDecision?.preconditionNeeded
-				? `\n  seeding: ${seedingDecision.usedSeeding ? 'yes' : 'no'} — ${
+				? `\n  Seeding: ${seedingDecision.usedSeeding ? 'yes' : 'no'} — ${
 						seedingDecision.reasoning
 				  }`
 				: '';

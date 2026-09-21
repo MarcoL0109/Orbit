@@ -44,6 +44,19 @@ export OPENAI_API_KEY="your_key_here"
 
 (A `.env` file in Orbit's own directory also works, but only when running Orbit's source directly during development — not for the installed CLI or CI use, both of which need a real exported environment variable.)
 
+Entirely optional: Orbit can offload one narrow, high-volume decision (picking the real state-mutating request out of a noisy batch of captured API calls, for seeding) to [TypeSafe AI's Jev](https://typesafe.ai) instead of GPT — cheaper and faster for that one job. There is no separate on/off switch — Orbit just checks whether `TYPESAFE_API_KEY` is set at startup: unset, it silently uses its own non-AI fallback logic instead; set but unreachable at call time, it falls back the same way for that call. Nothing about seeding itself depends on Jev being present. To enable it:
+
+```bash
+export TYPESAFE_API_KEY="your_key_here"
+```
+
+If you're running Jev through OpenRouter rather than a direct TypeSafe API key, also set the base URL and model:
+
+```bash
+export TYPESAFE_BASE_URL="https://openrouter.ai/api"
+export TYPESAFE_DEFAULT_MODEL="jev-1.13"
+```
+
 ## Quick start
 
 ```bash
