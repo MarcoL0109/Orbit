@@ -61,7 +61,7 @@ export const writeTestFileTool: ToolDefinition<
 			seedingDecision: {
 				type: 'object',
 				description:
-					'Required for every write, not just when you do seed something. First decide preconditionNeeded: does this test need an existing/created record it does NOT itself test the creation of (e.g. "confirm" needs a quotation to already exist)? If preconditionNeeded is false (this test has nothing to seed — e.g. it IS the creation feature itself, or every step is its own subject), leave reasoning empty; there is nothing to explain. If preconditionNeeded is true, decide explicitly whether that precondition was seeded via a direct API call replaying a captured request (see "Seeding a precondition" in your instructions) instead of driven through the UI, and reasoning becomes required and must be specific: if a matching captured request was available this run and you used the UI flow anyway, say why (e.g. the captured body wasn\'t cleanly replayable JSON); if no matching capture was available, say that. A vague or generic answer is exactly as useless as no answer, since this is the only record of why a given run did or didn\'t seed.',
+					'Required for every write, not just when you do seed something — and that includes justifying preconditionNeeded itself, not just what you did once it\'s true. First decide preconditionNeeded: does this test need an existing/created record it does NOT itself test the creation of (e.g. "confirm" needs a quotation to already exist)? Either way, reasoning is required and must explain THAT decision specifically: if preconditionNeeded is true, say whether a matching captured request was available this run and why you did or did not seed it; if preconditionNeeded is false, say WHY there is no precondition here — e.g. "this test IS the creation feature itself" or "every record this test touches is created within the test\'s own subject action, not before it" — not just the bare word false with nothing behind it. A wrong "false" is exactly as costly a mistake as a wrong "true" would be, and it can only be caught after the fact if the reasoning for it was actually written down. A vague or generic answer is exactly as useless as no answer, since this is the only record of why a given run did or didn\'t seed.',
 				properties: {
 					preconditionNeeded: {
 						type: 'boolean',
@@ -76,7 +76,7 @@ export const writeTestFileTool: ToolDefinition<
 					reasoning: {
 						type: 'string',
 						description:
-							'Required and must be non-blank when preconditionNeeded is true — a specific, honest explanation for the usedSeeding value above, not a restatement of it. Leave empty when preconditionNeeded is false; there is nothing to explain.',
+							'Required and must be non-blank in every case, whether preconditionNeeded is true or false — see the parent description for what each case must actually explain.',
 					},
 				},
 				required: ['preconditionNeeded', 'usedSeeding', 'reasoning'],
@@ -98,19 +98,19 @@ export const writeTestFileTool: ToolDefinition<
 		// Same enforcement report_result already applies to rootCause — a
 		// blank or missing reasoning is exactly as useless as no field at
 		// all, and without a check nothing stops the model from technically
-		// satisfying the schema with an empty string. Only enforced when a
-		// precondition actually exists to reason about — a test with none
-		// (e.g. the creation feature itself) has nothing to explain, and
-		// forcing boilerplate there would just be noise on every single
-		// write, not a real record of anything.
-		if (
-			seedingDecision?.preconditionNeeded &&
-			!seedingDecision.reasoning?.trim()
-		) {
+		// satisfying the schema with an empty string. Enforced unconditionally
+		// now, not just when preconditionNeeded is true — confirmed directly,
+		// a real run marked a "confirm a quotation" feature preconditionNeeded:
+		// false with reasoning left blank, silently skipping seeding on a
+		// feature whose own schema description names it as the canonical true
+		// example. A wrong "false" is exactly as costly as a wrong "true", and
+		// requiring a real justification for it is the only way a mistake like
+		// that is ever visible after the fact instead of silently accepted.
+		if (!seedingDecision?.reasoning?.trim()) {
 			return {
 				ok: false,
 				error:
-					'seedingDecision.reasoning is required and cannot be blank when preconditionNeeded is true — explain, specifically, whether a captured request was available for it this run and why you did or did not seed it. Call write_test_file again with that filled in.',
+					'seedingDecision.reasoning is required and cannot be blank, whether preconditionNeeded is true or false. If true, explain whether a captured request was available and why you did or did not seed it. If false, explain WHY there is no precondition here — a bare "false" with no justification is not acceptable, since a wrong false is exactly as costly a mistake as a wrong true. Call write_test_file again with that filled in.',
 			};
 		}
 

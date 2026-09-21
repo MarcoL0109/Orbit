@@ -145,7 +145,8 @@ test('write_test_file rejects a relativePath that escapes the configured test di
 			seedingDecision: {
 				preconditionNeeded: false,
 				usedSeeding: false,
-				reasoning: '',
+				reasoning:
+					'No precondition — this test creates its own subject record.',
 			},
 		},
 		fakeContext(projectRoot, orbitConfig),
@@ -172,7 +173,8 @@ test('write_test_file accepts a relativePath that stays inside the test director
 			seedingDecision: {
 				preconditionNeeded: false,
 				usedSeeding: false,
-				reasoning: '',
+				reasoning:
+					'No precondition — this test creates its own subject record.',
 			},
 		},
 		fakeContext(projectRoot, orbitConfig),
