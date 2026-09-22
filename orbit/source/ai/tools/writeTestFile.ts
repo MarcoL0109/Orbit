@@ -114,6 +114,68 @@ export const writeTestFileTool: ToolDefinition<
 			};
 		}
 
+		// Mechanical, not just described in the schema — the "seed it whenever
+		// a matching capture exists this run" rule has been talked around with
+		// self-invented exceptions the instructions never actually grant
+		// ("exercise the full UI path end to end", "avoid replaying a large
+		// body"), not just the two narrow, named ones (not JSON; a one-time
+		// token tied to that page load). A free-text reasoning field can't be
+		// checked for whether its excuse is one of those two or a new one made
+		// up on the spot — but whether a genuinely replayable capture exists
+		// at all is a plain fact this run's own steps already contain, so
+		// check that directly instead of trusting the excuse. Confirmed
+		// directly against a real run: usedSeeding stayed false across three
+		// separate reasons in a row — first no matching capture at all, then a
+		// capture that failed to actually get recorded, then (once a real one
+		// finally existed) reasons like these that dodge using it anyway.
+		//
+		// Reads context.getSeedableCandidates() rather than calling
+		// collectSeedableRequestsThisRun directly — that gives this gate
+		// whatever Jev's own noise filter already narrowed the candidates
+		// down to this turn (when Jev is configured and covers the current
+		// set), so a POST-tunneled read that merely happens to carry a JSON
+		// body doesn't trip this the same way a genuine mutation does. See
+		// seedRequestJev.ts's seedableCandidatesForGate.
+		if (seedingDecision.preconditionNeeded && !seedingDecision.usedSeeding) {
+			const seedable = context
+				.getSeedableCandidates()
+				.find(call =>
+					(call.requestContentType ?? '').toLowerCase().includes('json'),
+				);
+			if (seedable) {
+				return {
+					ok: false,
+					error: `seedingDecision says usedSeeding: false, but a genuinely replayable state-mutating request was captured live this run and is available to seed this precondition from: ${seedable.method} ${seedable.url}. Seeding whenever a matching capture exists is not optional and not a matter of preference — it applies regardless of the body's size, and "exercising the full UI path end to end" is exactly what seeding exists to avoid repeating on every single run of this test from here on; the feature under test is whatever this file's own subject is, not the precondition that gets you there. Either replay this exact captured request as the seed (see "Seeding a precondition" in your instructions) and set usedSeeding: true, or — ONLY if this specific request truly cannot be replayed, not because it's inconvenient or large, but because it isn't JSON or carries a one-time token tied to this exact page load — explain that precise technical reason in seedingDecision.reasoning. Call write_test_file again.`,
+				};
+			}
+		}
+
+		// Mechanical, not just described in the schema — "paste the captured
+		// body as a raw JSON string and parse it... rather than hand-retyping
+		// it as a JS object literal" (see "Seeding a precondition" in your
+		// instructions) has been violated even though the instructions name
+		// the exact failure it causes. Confirmed directly: a written test
+		// hand-retyped a captured web_save body as a JS object literal instead
+		// of JSON.parse(String.raw`...`), and in doing so silently dropped the
+		// large "specification" argument the server actually required — the
+		// server rejected the call (HTTP 200 with a JSON-RPC error body, since
+		// this backend embeds failures in the body rather than the status),
+		// and the test only found out two lines later as a confusing raw
+		// TypeError instead of a clear setup failure. Whether the pasted-JSON
+		// pattern is actually present is a plain, checkable fact about the
+		// file's own text — no need to trust that hand-retyping was faithful
+		// when it doesn't need to happen at all.
+		if (
+			seedingDecision.usedSeeding &&
+			!content.includes('JSON.parse(String.raw')
+		) {
+			return {
+				ok: false,
+				error:
+					'seedingDecision says usedSeeding: true, but this file does not contain the JSON.parse(String.raw`...`) pattern your instructions require for a seeded precondition body. Hand-retyping the captured body as a JS object literal is exactly what invites silently dropping a field the server actually needs (e.g. a large "specification"/"context" argument that looks like unrelated boilerplate) — paste the captured requestBody verbatim inside JSON.parse(String.raw`...`) instead, and override only the one traced field on the parsed object afterward. Call write_test_file again with the seed body rewritten that way.',
+			};
+		}
+
 		// Enforced, not just described in the schema — nothing else stops
 		// the model from nesting one file under a subdirectory while every
 		// other one it wrote stays flat, and it has: confirmed directly,

@@ -15,6 +15,7 @@ import {checksumFromContent} from '../projects/checksum.js';
 import {createOpenAIClient, type ResponsesClient} from './client.js';
 import {tryCreateJevClient, type SystemOneClient} from './jevClient.js';
 import {
+	seedableCandidatesForGate,
 	summarizeSeedableRequestsWithJev,
 	type SeedRefinementCache,
 } from './seedRequestJev.js';
@@ -120,10 +121,9 @@ export function describeAgentStepOutcome(
 		// shows whether Jev is doing anything at all, not just the prompt
 		// text it feeds the model.
 		case 'jev_seed_check': {
-			const {source, pick, confidence, candidateCount} = result.data as {
+			const {source, genuine, candidateCount} = result.data as {
 				source: 'jev' | 'fallback';
-				pick: {method: string; url: string} | null;
-				confidence?: number;
+				genuine: {method: string; url: string}[];
 				candidateCount: number;
 			};
 
@@ -133,10 +133,15 @@ export function describeAgentStepOutcome(
 				})`;
 			}
 
-			const confidencePercent = Math.round((confidence ?? 0) * 100);
-			return pick
-				? `✓ Jev: picked ${pick.method} ${pick.url} (${confidencePercent}% confidence) out of ${candidateCount} candidates`
-				: `✓ Jev: none of the ${candidateCount} candidates qualified (${confidencePercent}% confidence)`;
+			if (genuine.length === 0) {
+				return `✓ Jev: none of the ${candidateCount} candidates qualified as a genuine mutation`;
+			}
+
+			return `✓ Jev: kept ${
+				genuine.length
+			}/${candidateCount} as genuine mutations — ${genuine
+				.map(call => `${call.method} ${call.url}`)
+				.join(', ')}`;
 		}
 
 		case 'run_test': {
@@ -479,9 +484,9 @@ This exact mistake has recurred even with the guidance above already in place, s
 This is strictly more rigorous than a fixed expected total, and unlike one, it never breaks as the shared dataset grows.
 
 Seeding a precondition via a direct API call instead of the UI — do this by default, not just when convenient: "create that record within the same test first, then act on the one you just created" (above) does NOT mean replaying the full UI flow every time, and it is NOT only about creation — a precondition is just as often "an existing record in a particular STATE" (a confirmed order to cancel, a deleted item to restore, an archived record to reactivate) as it is "an existing record, period." Whichever it is, the request that establishes it — create, update, confirm, delete, or any other mutation — is seedable the same way. Before writing ANY precondition-setup step, stop and check: have I, earlier THIS run, already watched this same establishing action succeed live and captured its real request via browser_action's apiCalls? If yes, seed it — write the precondition as a page.request.post replaying that captured request (it shares the same authenticated session automatically), not as a repeat of the same clicks and fills you already did once to reach that state the first time. Falling back to the familiar click-through-the-form pattern out of habit, when a real capture already sits right there in this run's own history, is the mistake this paragraph exists to prevent — it is not a style preference, it wastes exactly the cost this technique exists to cut, on every single run of the written test from here on, not just this one. This only ever applies to a PRECONDITION a feature needs, never to the feature's own subject — a "confirm a quotation" test MUST seed the quotation it confirms whenever a matching capture is available this run; a "cancel a confirmed order" test MUST seed both the creation AND the confirmation that got it into that state; a "create a quotation" test may never seed its own create, since that is literally what it exists to prove. Four rules make this safe:
-1. Only seed from a request this run genuinely watched succeed live — never a past run's memory, never a plausible-looking body you constructed yourself. If you haven't actually reached that state live yet this run (e.g. you were asked to test "cancel a confirmed order" without ever confirming one, or "restore a deleted item" without ever deleting one), go establish it live via the UI first — even though it isn't this feature's own subject — so you have a real captured request (or sequence of requests, if reaching the state took more than one action) to seed from, exactly the same "verified this run, not assumed" standard selectors are already held to.
+1. Only seed from a request this run genuinely watched succeed live — never a past run's memory, never a plausible-looking body you constructed yourself. If you haven't actually reached that state live yet this run (e.g. you were asked to test "cancel a confirmed order" without ever confirming one, or "restore a deleted item" without ever deleting one), go establish it live via the UI first — even though it isn't this feature's own subject — so you have a real captured request (or sequence of requests, if reaching the state took more than one action) to seed from, exactly the same "verified this run, not assumed" standard selectors are already held to. Searching for a pre-existing record that already happens to be in the target state (filtering a list down to one that qualifies, picking whichever row matches) is NOT a substitute for this, no matter how the pick is made — dynamically selecting one is still trusting a record this run did not itself put into that state, exactly the same "never assume a specific existing record's current state" mistake as hardcoding a specific one, just with an extra step in between. You have no way to know whether the app you're testing keeps that data around between runs, resets it, or never had it in the first place — a precondition this test doesn't establish itself is one it doesn't actually control, and the test can start failing, or silently pass against the wrong record, the moment that assumption stops holding. Establish the state yourself, this run, every time.
 2. Copy the ENTIRE captured requestBody character-for-character — do not hand-edit, simplify, shorten, or strip ANY part of it, including a large "specification"/"context"/view-metadata block that looks like unrelated boilerplate. You do not get to judge what's safe to remove, because you have no source telling you what the server actually reads from it — a field that looks irrelevant to the record's own data can still be exactly what the server needs to place the record in the right state. Confirmed directly: a written test hand-trimmed a captured web_save body down to what looked like the relevant fields, and the resulting record did not end up in the expected draft state — the exact failure this rule exists to prevent. The ONLY edit allowed, ever, is finding the one field you can trace back to something you actually typed live — by matching the exact string you typed against the captured JSON, not by interpreting field names you don't have source for — and re-stamping just THAT field's value with something unique to this run. Nothing else in the string changes, not even surrounding structure that looks unrelated. Replay the same requestContentType header too, not just the body — a JSON body sent with the wrong content-type can be rejected outright. If reaching the needed state took more than one real action (e.g. create, then separately confirm), replay them as that same sequence of seed calls, in order — each one still verbatim, each still re-stamped only on the one traced field.
-3. Explicitly check the seed response before proceeding — assert its status is ok and parse its body the same way you already parsed the real response when you verified that action live. Treat a bad response as a real setup failure right there, not something to plow past and let surface as a confusing failure two steps later.
+3. Explicitly check the seed response before proceeding — assert its status is ok AND parse its body to confirm it actually contains the success shape you saw when you verified that action live, the same way you already parsed the real response then. An ok() HTTP status is not enough by itself: some backends (JSON-RPC-style APIs in particular, this app's own Odoo backend included) return HTTP 200 even when the call itself failed, with the real failure embedded in the body instead (e.g. an "error" field alongside where "result" would otherwise be) — checking status alone will not catch that. Confirmed directly: a seed request came back ok() === true with an RPC-level error body, and the test only found out two lines later as a raw, confusing TypeError from indexing into a "result" that didn't exist, instead of a clear, immediate setup failure at the point that actually went wrong. Treat a bad response — wrong HTTP status OR a body that doesn't match the success shape you verified live — as a real setup failure right there (throw with the actual error content from the body so it's visible), not something to plow past and let surface as a confusing failure two steps later.
 4. Parse the record's id/reference out of that response, then navigate straight to it via a direct deep-link URL (the model name is embedded in the captured request's own URL path) — never search the UI for it, since a value that only ever went through a raw API call was never typed into any form this run for a search to find. (A delete-type precondition is the one exception worth watching for — the record may no longer be reachable at a normal view URL at all once deleted, so confirm live what actually happens to a deleted record in this app before assuming the same deep-link pattern still applies.)
 If the captured body isn't cleanly replayable JSON (a file upload, a request carrying a one-time token tied to that specific page load) — fall back to the normal UI flow instead of forcing it.
 Write it this way — paste the captured body as a raw JSON string and parse it, then override only the traced field — rather than hand-retyping it as a JS object literal: hand-retyping is exactly what invites "cleaning up" a field along the way, which rule 2 above exists to forbid.
@@ -591,6 +596,7 @@ export async function runTestingAgent(
 		| 'getCurrentExplorationNodeId'
 		| 'setCurrentExplorationNodeId'
 		| 'getSteps'
+		| 'getSeedableCandidates'
 	>,
 	options: RunTestingAgentOptions = {},
 ): Promise<AgentRunResult> {
@@ -650,6 +656,8 @@ export async function runTestingAgent(
 			currentExplorationNodeIdRef.current = id;
 		},
 		getSteps: () => steps,
+		getSeedableCandidates: () =>
+			seedableCandidatesForGate(steps, seedRefinementCacheRef),
 	};
 
 	// Computed once, not per-turn — scanMode, the graph's presence on disk,

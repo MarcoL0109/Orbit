@@ -1,5 +1,5 @@
 import type {OrbitConfig} from '../../init/config.js';
-import type {BrowserWorkerHandle} from '../browserWorker.js';
+import type {ApiCall, BrowserWorkerHandle} from '../browserWorker.js';
 import type {AgentStep} from '../agentLoop.js';
 
 export type ToolResult<T = unknown> =
@@ -65,6 +65,15 @@ export type ToolContext = {
 	// than trusting the model's own say-so. See verifiedSelectors.ts's
 	// findUnverifiedNames.
 	getSteps: () => AgentStep[];
+	// The current run's own captured seeding candidates, already run through
+	// Jev's noise filter when Jev is configured and its filter covers the
+	// exact candidate set as of right now — otherwise the same raw,
+	// mechanical candidates collectSeedableRequestsThisRun always returns.
+	// write_test_file's own seeding gate uses this instead of calling
+	// collectSeedableRequestsThisRun directly, so it benefits from Jev's
+	// filtering without triggering a second, redundant live call of its own.
+	// See seedRequestJev.ts's seedableCandidatesForGate.
+	getSeedableCandidates: () => ApiCall[];
 };
 
 // Deliberately smaller than ToolContext — the environment setup agent's

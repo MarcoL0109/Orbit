@@ -88,6 +88,9 @@ function fakeContext(
 		getSteps() {
 			throw new Error('getSteps should not be reached');
 		},
+		getSeedableCandidates() {
+			throw new Error('getSeedableCandidates should not be reached');
+		},
 	};
 }
 

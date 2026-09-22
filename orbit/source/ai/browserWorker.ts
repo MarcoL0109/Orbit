@@ -189,6 +189,12 @@ let lastSnapshot = null;
 let pendingApiCalls = [];
 let pendingConsoleErrors = [];
 let pendingWebSocketMessages = [];
+// Counts xhr/fetch requests currently in flight — settle() waits for this to
+// hit 0 instead of trusting Playwright's own networkidle signal. See settle()
+// for why: an app with any background polling connection (this project's own
+// mail/activity bus, confirmed directly) can keep networkidle from ever
+// resolving inside a bounded timeout, dropping a real, slower response.
+let pendingRequestCount = 0;
 
 const MAX_CAPTURED_TEXT_CHARS = 2000;
 // requestBody specifically needs a much looser cap than everything else
@@ -244,6 +250,25 @@ async function ensurePage() {
     // scripts, stylesheets, images, fonts; none of that is the "did my
     // data show up" question this exists to answer, and capturing all of
     // it would bury the one or two calls that actually matter.
+    // Tracks in-flight xhr/fetch requests for settle()'s own wait — separate
+    // from the response listener below, since a request that ultimately
+    // fails (network error, aborted) never fires 'response' at all but still
+    // needs to stop counting as in flight, or settle() would wait out its
+    // full timeout for a response that is never coming.
+    const isTrackedRequest = (request) => {
+      const resourceType = request.resourceType();
+      return resourceType === 'xhr' || resourceType === 'fetch';
+    };
+    page.on('request', (request) => {
+      if (isTrackedRequest(request)) pendingRequestCount++;
+    });
+    page.on('requestfinished', (request) => {
+      if (isTrackedRequest(request)) pendingRequestCount--;
+    });
+    page.on('requestfailed', (request) => {
+      if (isTrackedRequest(request)) pendingRequestCount--;
+    });
+
     page.on('response', (response) => {
       if (pendingApiCalls.length >= MAX_CAPTURED_PER_ACTION) return;
       const resourceType = response.request().resourceType();
@@ -357,7 +382,32 @@ async function snapshotOf(p, frameSelector) {
 // this is a bounded-time nudge, not a guarantee. Never blocks longer than
 // the timeout even if the page keeps background network activity forever.
 async function settle(p) {
-  await p.waitForLoadState('networkidle', {timeout: 2000}).catch(() => {});
+  // Waits for THIS action's own xhr/fetch requests to actually finish,
+  // rather than trusting Playwright's networkidle (no in-flight connections
+  // for 500ms) — networkidle can't be trusted on a page with ANY background
+  // polling connection (this project's own mail/activity bus, confirmed
+  // directly), since that alone can keep the network from ever looking
+  // "idle" within a bounded timeout, silently losing a real response that
+  // simply took longer than the wait. Polling requests still increment
+  // pendingRequestCount like any other, but each one also finishes and
+  // decrements again on its own schedule — unlike networkidle's need for
+  // 500 consecutive ms of total silence, a brief count-hits-0 gap is enough
+  // to exit here the moment this action's own requests are actually done,
+  // so a busy-but-idle-ish page usually still settles fast.
+  //
+  // Confirmed directly: a "Save manually" click's own sale.order/web_save
+  // response arrived after the old 2000ms networkidle window had already
+  // closed (server-side approval/activity computation made it genuinely
+  // slower than that), and it never appeared in ANY action's captured
+  // apiCalls anywhere in the run — not dropped into the wrong batch, just
+  // gone, discarded by actAndReport's own pre-action clear before anything
+  // ever drained it. A five-second ceiling still applies below so an action
+  // that never resolves (or a persistent connection that never finishes)
+  // can't hang this indefinitely.
+  const deadline = Date.now() + 5000;
+  while (pendingRequestCount > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
   // 'networkidle' is a network-level signal (no in-flight connections) —
   // it can resolve slightly before a response's own .then()/catch handler
   // has actually run (that's a separate JS microtask, not tied to the
@@ -467,6 +517,7 @@ async function handle(command) {
       pendingApiCalls = [];
       pendingConsoleErrors = [];
       pendingWebSocketMessages = [];
+      pendingRequestCount = 0;
       return {ok: true};
     }
     case 'close': {

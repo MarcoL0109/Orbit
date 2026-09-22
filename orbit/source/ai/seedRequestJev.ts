@@ -1,6 +1,6 @@
 import type {AgentStep} from './agentLoop.js';
 import type {ApiCall} from './browserWorker.js';
-import {choice, type SystemOneClient} from './jevClient.js';
+import {noul, type SystemOneClient} from './jevClient.js';
 import {
 	collectSeedableRequestsThisRun,
 	summarizeSeedableRequests,
@@ -15,115 +15,103 @@ import {
 // to.
 
 // Kept well under Jev's 32K state character limit even with several
-// candidates in one batch (MAX_CAPTURED_PER_ACTION caps that batch at 10,
-// but candidates surviving collectSeedableRequestsThisRun's click
-// correlation are usually far fewer). Jev's job here is only to PICK the
-// right candidate, not to hold the byte-exact body — the written test still
+// candidates across a run (MAX_CAPTURED_PER_ACTION caps each individual
+// batch at 10, but collectSeedableRequestsThisRun dedupes by endpoint across
+// the whole run, so the total is usually far fewer than that times however
+// many commit-clicks happened). Jev's job here is only to say yes/no on
+// each one, not to hold the byte-exact body — the written test still
 // replays the original, untruncated capture from collectSeedableRequestsThisRun,
 // never anything reconstructed from what Jev was shown.
 const CANDIDATE_PREVIEW_CHARS = 1500;
-
-const NONE_LABEL = 'none';
 
 function candidateLabel(index: number): string {
 	return `call_${index}`;
 }
 
 export type SeedRequestRefinement =
-	// Jev picked a specific candidate, or explicitly said none of them
-	// qualify — either way, confidence is Jev's own calibrated probability
-	// for that answer, not a guess.
-	| {source: 'jev'; pick: ApiCall | null; confidence: number}
-	// Jev was never consulted (0 or 1 candidates — nothing to disambiguate)
-	// or the call failed/errored — the mechanical filter's own ordering is
-	// still a usable, if less precise, answer. Never let a Jev failure
-	// block seeding entirely: "AI-assisted, not AI-dependent."
-	| {source: 'fallback'; pick: ApiCall | null};
+	// Jev looked at every candidate independently and said which ones are
+	// genuine mutations — zero, one, or several can survive; this is a
+	// filter, not a pick-one selector. Two real, distinct establishing
+	// actions in the same run (e.g. a create AND a separate confirm) are
+	// both genuine and both belong in the result — forcing a single winner
+	// between them would be wrong, not just imprecise.
+	| {source: 'jev'; genuine: ApiCall[]}
+	// Jev was never consulted (0 or 1 candidates — nothing to filter) or the
+	// call failed/errored — the mechanical filter's own candidates are still
+	// a usable, if noisier, answer. Never let a Jev failure block seeding
+	// entirely: "AI-assisted, not AI-dependent." All candidates pass through
+	// unfiltered here rather than none, for the same reason.
+	| {source: 'fallback'; genuine: ApiCall[]};
 
 // Refines collectSeedableRequestsThisRun's own output — never a substitute
-// for it. Candidates in, at most one of them (or null) out.
+// for it. Candidates in, the subset that are genuine mutations out; which
+// of those (if any) actually matches what a SPECIFIC precondition needs is
+// still left entirely to the model — Jev only separates real mutations from
+// noise, it has no idea what any given test file is about.
 export async function seedRequestJev(
 	candidates: ApiCall[],
 	jevClient: SystemOneClient,
 ): Promise<SeedRequestRefinement> {
 	if (candidates.length === 0) {
-		return {source: 'fallback', pick: null};
+		return {source: 'fallback', genuine: []};
 	}
 
-	// Nothing to disambiguate — nothing Jev could add over the mechanical
-	// filter's own single answer, so skip the call entirely.
+	// Nothing to filter — a single candidate is either usable or it isn't,
+	// and collectSeedableRequestsThisRun's own method/body/truncation
+	// filtering already made that call; Jev would add nothing here.
 	if (candidates.length === 1) {
-		return {source: 'fallback', pick: candidates[0]!};
+		return {source: 'fallback', genuine: candidates};
 	}
 
-	// Deliberately NOT scoped to "creation" specifically — a precondition
-	// isn't always "an existing record," it can just as easily be "an
-	// existing record in a particular STATE": a confirmed order to cancel,
-	// a deleted item to restore, an archived record to reactivate. The
-	// request that establishes any of those is an update/state-transition
-	// or delete call, not a create — asking Jev to find only a "creation"
-	// would actively steer it away from picking those. The real dividing
-	// line this needs to draw is "a genuine server-side mutation" versus
-	// "read-only or unrelated traffic that happened to fire alongside it"
-	// — which specific KIND of mutation actually matches what this test's
-	// precondition needs is left to the agent itself, which has that
-	// context and the full untruncated body; Jev's only job is separating
-	// real mutations from noise.
-	const criteria: Record<string, string> = {
-		[NONE_LABEL]:
-			'None of the candidates is a genuine state-mutating request (creating, updating, confirming, deleting, or otherwise persisting a change) — every one is unrelated traffic that happened to fire alongside the same click (a search, a view/onchange preview, a bootstrap or messaging call), not an actual mutation.',
-	};
-
+	// One independent yes/no question per candidate, asked in a single
+	// request (Questions can hold any number of named entries) — not one
+	// choice question forced to pick a single winner. Deliberately NOT
+	// scoped to "creation" specifically — a precondition isn't always "an
+	// existing record," it can just as easily be "an existing record in a
+	// particular STATE": a confirmed order to cancel, a deleted item to
+	// restore, an archived record to reactivate. The request that
+	// establishes any of those is an update/state-transition or delete
+	// call, not a create — asking only about "creation" would actively
+	// steer Jev away from a real confirm/update/delete candidate sitting
+	// right next to a real create one. The real dividing line is "a genuine
+	// server-side mutation" versus "read-only or unrelated traffic that
+	// happened to fire alongside it."
+	const questions: Record<string, ReturnType<typeof noul>> = {};
 	candidates.forEach((call, index) => {
-		criteria[
-			candidateLabel(index)
-		] = `The candidate at this index (${call.method} ${call.url}) is a genuine state-mutating request — one that actually creates, updates, confirms, deletes, or otherwise persists a change on the server, as opposed to a read, a search, a preview, or unrelated background traffic.`;
+		questions[candidateLabel(index)] = noul(
+			`This request was captured during a live test-writing run, behind a click that looked like it commits a change (save/submit/create/confirm). Is it a genuine state-mutating request — one that actually creates, updates, confirms, deletes, or otherwise persists a change on the server — as opposed to a read, a search, a form-preview/onchange call, or unrelated background traffic (messaging, notifications, view metadata) that just happened to fire around the same click?\n\n${
+				call.method
+			} ${call.url}\nbody: ${
+				call.requestBody?.slice(0, CANDIDATE_PREVIEW_CHARS) ?? '(none)'
+			}`,
+			{
+				true: 'A genuine mutation — safe to consider replaying as a test precondition.',
+				false:
+					'Not a mutation — a read, search, preview, or unrelated background traffic.',
+			},
+		);
 	});
 
 	try {
 		const {answers} = await jevClient.systemOne({
-			state: {
-				instructions:
-					'These API requests were all captured during a single UI click in a live web app test — one real user action, several network calls it happened to trigger. Identify which ONE, if any, actually mutates server-side state (creates, updates, confirms, deletes, or otherwise persists a change), as opposed to a search, a form-preview/onchange call, or unrelated background traffic (messaging, notifications, view metadata) that just happened to fire during the same click.',
-				candidates: candidates.map((call, index) => ({
-					id: candidateLabel(index),
-					method: call.method,
-					url: call.url,
-					requestBodyPreview:
-						call.requestBody?.slice(0, CANDIDATE_PREVIEW_CHARS) ?? null,
-				})),
-			},
-			questions: {
-				seedable_request: choice(
-					'Which candidate (by id), if any, is a genuine state-mutating request safe to replay as a test precondition?',
-					criteria,
-				),
-			},
+			state:
+				'Each question below is its own independent captured API request from the same test-writing run — judge each on its own, not relative to the others.',
+			questions,
 		});
 
-		const answer = answers['seedable_request'];
-		if (!answer) {
-			return {source: 'fallback', pick: candidates[0]!};
-		}
+		const genuine = candidates.filter((_, index) => {
+			const answer = answers[candidateLabel(index)];
+			// A missing answer (a partial/malformed response) is treated as
+			// "keep" rather than "drop" — Jev failing to answer is not the
+			// same as Jev answering no, and losing a real candidate to an
+			// ambiguous non-answer is a worse outcome than showing one extra
+			// candidate the model has to look at itself.
+			return (answer?.noul ?? 1) >= 0.5;
+		});
 
-		if (answer.choice === NONE_LABEL) {
-			return {source: 'jev', pick: null, confidence: answer.confidence};
-		}
-
-		const index = candidates.findIndex(
-			(_, candidateIndex) => candidateLabel(candidateIndex) === answer.choice,
-		);
-		const pick = index === -1 ? null : candidates[index]!;
-
-		// A choice label Jev returned that doesn't map back to a real
-		// candidate index is a contract mismatch, not a real "none" answer
-		// — treat it the same as an unreachable Jev rather than trust a
-		// pick that doesn't actually resolve to anything.
-		return pick
-			? {source: 'jev', pick, confidence: answer.confidence}
-			: {source: 'fallback', pick: candidates[0]!};
+		return {source: 'jev', genuine};
 	} catch {
-		return {source: 'fallback', pick: candidates[0]!};
+		return {source: 'fallback', genuine: candidates};
 	}
 }
 
@@ -145,9 +133,41 @@ function candidateSetKey(candidates: ApiCall[]): string {
 		.join('|');
 }
 
+// Used by write_test_file's own seeding gate — reads whatever
+// summarizeSeedableRequestsWithJev already computed for THIS turn out of the
+// same cache, rather than triggering a second live Jev call of its own (that
+// call is async and this needs to be safe to call synchronously from inside
+// a tool's execute()). Falls back to the raw, unfiltered candidate list
+// whenever Jev hasn't filtered the CURRENT exact candidate set — no
+// TYPESAFE_API_KEY configured, Jev unreachable, or new captures arrived
+// since the cached refinement was computed — so the gate is never worse off
+// than checking collectSeedableRequestsThisRun directly, only more precise
+// (fewer false positives on a POST-tunneled read that merely has a JSON
+// body) when a matching filtered result actually exists.
+export function seedableCandidatesForGate(
+	steps: AgentStep[],
+	cache: SeedRefinementCache,
+): ApiCall[] {
+	const candidates = collectSeedableRequestsThisRun(steps);
+	if (candidates.length === 0) {
+		return candidates;
+	}
+
+	const current = cache.current;
+	if (
+		current &&
+		current.candidateKey === candidateSetKey(candidates) &&
+		current.refinement.source === 'jev'
+	) {
+		return current.refinement.genuine;
+	}
+
+	return candidates;
+}
+
 // What agent.ts's buildSystemPrompt actually shows the model every turn —
 // mechanical list unchanged when Jev isn't configured, unavailable, or has
-// nothing to disambiguate (source: 'fallback'); Jev's own pick surfaced
+// nothing to filter (source: 'fallback'); Jev's own filtered set surfaced
 // first, ahead of that same list kept for reference/fallback visibility,
 // whenever Jev actually answered. jevClient is null for any project with no
 // TYPESAFE_API_KEY set — Jev is an optional enhancement, never a
@@ -191,15 +211,18 @@ export async function summarizeSeedableRequestsWithJev(
 		return mechanicalList;
 	}
 
-	const confidencePercent = Math.round(refinement.confidence * 100);
+	const excludedCount = candidates.length - refinement.genuine.length;
 
-	if (refinement.pick === null) {
-		return `Jev reviewed the ${candidates.length} candidates below and found none of them a genuine state-mutating request (${confidencePercent}% confidence) — do not seed from any of these for this precondition.\n\n${mechanicalList}`;
+	if (refinement.genuine.length === 0) {
+		return `Jev reviewed the ${candidates.length} candidates below and found none of them a genuine state-mutating request — do not seed from any of these for this precondition.\n\n${mechanicalList}`;
 	}
 
-	return `Jev's pick out of the ${candidates.length} candidates below, as the one most likely to be a genuine state-mutating request (${confidencePercent}% confidence) — confirm it actually matches the specific precondition state this feature needs (e.g. created vs. confirmed vs. deleted) before seeding from it, since Jev only separates real mutations from unrelated traffic, not which mutation this test specifically needs:
-- ${refinement.pick.method} ${refinement.pick.url}
-  body: ${refinement.pick.requestBody}
+	const genuineList = refinement.genuine
+		.map(call => `- ${call.method} ${call.url}\n  body: ${call.requestBody}`)
+		.join('\n');
+
+	return `Jev reviewed the ${candidates.length} candidates below and kept ${refinement.genuine.length} as genuine state-mutating requests (excluded ${excludedCount} as reads/previews/unrelated traffic). Which of these (if any) actually matches the specific precondition state THIS feature needs (e.g. created vs. confirmed vs. deleted) is still your own call — Jev only separates real mutations from noise, not which mutation a given test needs:
+${genuineList}
 
 All candidates, for reference:
 ${mechanicalList}`;
