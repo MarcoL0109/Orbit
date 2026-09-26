@@ -102,14 +102,22 @@ export function describeAgentStepOutcome(
 					reasoning: string;
 				};
 			};
-			// Only shown when there was actually something to seed — a test
-			// with no precondition (the creation feature itself, say) has
-			// nothing to report here, and showing an empty/boilerplate line
-			// for it every time would just be noise on every single write.
-			const seedingNote = seedingDecision?.preconditionNeeded
-				? `\n  Seeding: ${seedingDecision.usedSeeding ? 'yes' : 'no'} — ${
-						seedingDecision.reasoning
-				  }`
+			// Shown for every write, not just when preconditionNeeded is true —
+			// a wrong "false" is exactly as costly a mistake as a wrong "true"
+			// (see write_test_file's own unconditional reasoning-blank
+			// enforcement), and there was no way to catch one live while the
+			// transcript stayed silent about it. Confirmed directly: a run
+			// classified a five-commit-click chain (create, confirm, invoice,
+			// post, pay) as preconditionNeeded: false with a plausible-
+			// sounding but wrong reasoning, and nothing in the live transcript
+			// showed that decision — or its justification — at all until the
+			// session file was read after the fact.
+			const seedingNote = seedingDecision
+				? `\n  Precondition needed: ${
+						seedingDecision.preconditionNeeded
+							? `yes, seeded: ${seedingDecision.usedSeeding ? 'yes' : 'no'}`
+							: 'no'
+				  } — ${seedingDecision.reasoning}`
 				: '';
 			return `✓ Wrote ${relativePath ?? 'test file'}${seedingNote}`;
 		}
